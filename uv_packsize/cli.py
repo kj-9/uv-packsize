@@ -26,7 +26,7 @@ def _create_venv(venv_dir):
     return python_executable
 
 
-def _install_package(python_executable, package_name, dev):
+def _install_package(python_executable, package_name):
     click.echo(f"Installing {package_name} and its dependencies...")
     install_command = [
         "uv",
@@ -36,8 +36,6 @@ def _install_package(python_executable, package_name, dev):
         python_executable,
         package_name,
     ]
-    if dev:
-        install_command.extend(["--group", "dev"])
 
     result = subprocess.run(
         install_command,
@@ -95,12 +93,14 @@ def _analyze_binary_sizes(venv_dir):
         sorted_binaries.sort(key=lambda item: item[1], reverse=True)
 
         for filename, file_size in sorted_binaries:
-            click.echo(f"  {filename}: {file_size / (1024 * 1024):.2f} MB")
-            binaries_total_size += file_size
+            if file_size > 0:
+                if file_size < 1024 * 1024:  # Less than 1 MB, show in KB
+                    click.echo(f"  {filename}: {file_size / 1024:.2f} KB")
+                else:
+                    click.echo(f"  {filename}: {file_size / (1024 * 1024):.2f} MB")
+                binaries_total_size += file_size
 
-        click.echo(
-            f"Total Binaries in .venv/bin: {binaries_total_size / (1024 * 1024):.2f} MB"
-        )
+        click.echo(f"Total Binaries Size: {binaries_total_size / (1024 * 1024):.2f} MB")
     return binaries_total_size
 
 
@@ -108,32 +108,33 @@ def _analyze_binary_sizes(venv_dir):
 @click.version_option()
 @click.argument("package_name")
 @click.option(
-    "--dev",
-    is_flag=True,
-    help="Include development dependencies in the size calculation.",
-)
-@click.option(
     "--bin",
     is_flag=True,
     help="Include the size of binaries in the .venv/bin directory.",
 )
-def cli(package_name, dev, bin):
+def cli(package_name, bin):
     """Report the size of a Python package and its dependencies using uv."""
     click.echo(f"Calculating size for {package_name}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         python_executable = _create_venv(venv_dir)
-        _install_package(python_executable, package_name, dev)
+        _install_package(python_executable, package_name)
         package_sizes = _analyze_package_sizes(venv_dir)
 
         click.echo("--- Package Sizes ---")
-        total_size = 0
+        total_package_size = 0
         for pkg, size in sorted(
             package_sizes.items(), key=lambda item: item[1], reverse=True
         ):
-            click.echo(f"{pkg}: {size / (1024 * 1024):.2f} MB")
-            total_size += size
+            if size > 0:
+                if size < 1024 * 1024:  # Less than 1 MB, show in KB
+                    click.echo(f"{pkg}: {size / 1024:.2f} KB")
+                else:
+                    click.echo(f"{pkg}: {size / (1024 * 1024):.2f} MB")
+                total_package_size += size
+        click.echo(f"Total Package Size: {total_package_size / (1024 * 1024):.2f} MB")
+        total_size = total_package_size
 
         if bin:
             binaries_total_size = _analyze_binary_sizes(venv_dir)
