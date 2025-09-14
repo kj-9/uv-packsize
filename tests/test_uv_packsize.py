@@ -38,3 +38,12 @@ def test_bin_option():
         assert result.exit_code == 0
         assert "uv-packsize" in result.output
         assert "Total Binaries Size" in result.output
+
+
+def test_uv_not_found(monkeypatch):
+    """Test that the CLI exits gracefully if uv is not installed."""
+    monkeypatch.setenv("PATH", "")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["iniconfig==2.0.0"])
+    assert result.exit_code != 0
+    assert "'uv' command not found" in result.output

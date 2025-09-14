@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import shutil
 
 import click
 
@@ -16,9 +17,13 @@ def get_dir_size(path):
     return total_size
 
 
-def _create_venv(venv_dir):
+def _create_venv(venv_dir, python=None):
     click.echo(f"Creating virtual environment in {venv_dir}...")
-    subprocess.run(["uv", "venv", venv_dir], check=True, capture_output=True)
+    command = ["uv", "venv"]
+    if python:
+        command.extend(["--python", python])
+    command.append(venv_dir)
+    subprocess.run(command, check=True, capture_output=True)
 
     python_executable = os.path.join(venv_dir, "bin", "python")
     if not os.path.exists(python_executable):  # For Windows
@@ -151,13 +156,27 @@ def _print_table(title, data, footer_title, footer_value, name_width, size_width
     is_flag=True,
     help="Include the size of binaries in the .venv/bin directory.",
 )
-def cli(package_name, bin):
+@click.option(
+    "-p",
+    "--python",
+    "python_version",
+    help="Specify the Python version for the virtual environment.",
+)
+def cli(package_name, bin, python_version):
     """Report the size of a Python package and its dependencies using uv."""
+    if not shutil.which("uv"):
+        click.echo(
+            "Error: 'uv' command not found. Please install it first. "
+            "See https://github.com/astral-sh/uv for installation instructions.",
+            err=True,
+        )
+        sys.exit(1)
+
     click.echo(f"Calculating size for {package_name}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
-        python_executable = _create_venv(venv_dir)
+        python_executable = _create_venv(venv_dir, python_version)
         _install_package(python_executable, package_name)
 
         click.echo("Analyzing sizes...")
