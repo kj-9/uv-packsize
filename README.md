@@ -34,7 +34,6 @@ Usage: uv-packsize [OPTIONS] PACKAGE_NAME
 
 Options:
   --version  Show the version and exit.
-  --dev      Include development dependencies in the size calculation.
   --bin      Include the size of binaries in the .venv/bin directory.
   --help     Show this message and exit.
 

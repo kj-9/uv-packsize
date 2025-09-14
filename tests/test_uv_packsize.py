@@ -32,9 +32,6 @@ def test_non_existent_package():
         )
 
 
-
-
-
 def test_bin_option():
     runner = CliRunner()
     with runner.isolated_filesystem():
