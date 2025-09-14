@@ -24,7 +24,7 @@ ci-check:
 	$(UV_RUN) ruff format . --check
 	$(UV_RUN) ruff check .
 	$(UV_RUN) ty check
-	$(UV_RUN) cog --check README.md
+	$(UV_RUN) cog --check --diff README.md
 
 check: readme format lint typecheck test
 
