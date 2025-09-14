@@ -49,22 +49,16 @@ Options:
 ```
 <!-- [[[end]]] -->
 
+You can also use:
+```bash
+python -m uv_packsize --help
+```
+
 ### Example
 
 ```bash
 uv-packsize apache-airflow==3.0.0
 ```
-<!-- [[[cog
-import cog
-from uv_packsize import cli
-from click.testing import CliRunner
-runner = CliRunner()
-result = runner.invoke(cli.cli, ["apache-airflow==3.0.0"])
-help = result.output.replace("Usage: cli", "Usage: uv-packsize")
-cog.out(
-    f"```bash\n{help}\n```"
-)
-]]] -->
 ```bash
 Calculating size for apache-airflow==3.0.0...
 Creating virtual environment...
@@ -240,13 +234,7 @@ Total size:                               128.56 MB
 Calculation complete.
 
 ```
-<!-- [[[end]]] -->
 
-
-You can also use:
-```bash
-python -m uv_packsize --help
-```
 ## Development
 
 To contribute to this tool, first checkout the code. Then create a new virtual environment using uv:
