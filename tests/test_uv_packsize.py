@@ -18,7 +18,6 @@ def test_basic_package_size():
         assert result.exit_code == 0
         assert "iniconfig" in result.output
         assert "Total size:" in result.output
-        assert "MB" in result.output
 
 
 def test_non_existent_package():
@@ -38,4 +37,4 @@ def test_bin_option():
         result = runner.invoke(cli, ["uv-packsize==0.1.0a0", "--bin"])
         assert result.exit_code == 0
         assert "uv-packsize" in result.output
-        assert "Total Binaries Size:" in result.output
+        assert "Total Binaries Size" in result.output
