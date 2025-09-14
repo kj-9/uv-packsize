@@ -33,9 +33,10 @@ Usage: uv-packsize [OPTIONS] PACKAGE_NAME
   Report the size of a Python package and its dependencies using uv.
 
 Options:
-  --version  Show the version and exit.
-  --bin      Include the size of binaries in the .venv/bin directory.
-  --help     Show this message and exit.
+  --version          Show the version and exit.
+  --bin              Include the size of binaries in the .venv/bin directory.
+  -p, --python TEXT  Specify the Python version for the virtual environment.
+  --help             Show this message and exit.
 
 ```
 <!-- [[[end]]] -->

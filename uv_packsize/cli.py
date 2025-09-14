@@ -1,8 +1,8 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-import shutil
 
 import click
 
@@ -18,7 +18,16 @@ def get_dir_size(path):
 
 
 def _create_venv(venv_dir, python=None):
-    click.echo(f"Creating virtual environment in {venv_dir}...")
+    if python:
+        click.echo(
+            f"Creating virtual environment in {venv_dir} with Python {python}..."
+        )
+    else:
+        py_version = ".".join(map(str, sys.version_info[:3]))
+        click.echo(
+            f"Creating virtual environment in {venv_dir} with default Python ({py_version})..."
+        )
+
     command = ["uv", "venv"]
     if python:
         command.extend(["--python", python])
@@ -121,7 +130,9 @@ def _format_size(size_in_bytes):
     return f"{size_in_bytes / (1024 * 1024):.2f} MB"
 
 
-def _print_table(title, data, footer_title, footer_value, name_width, size_width):
+def _print_table(  # noqa: PLR0913
+    title, data, footer_title, footer_value, name_width, size_width
+):
     if not data:
         click.echo(f"\n--- {title} ---")
         click.echo("No items to display.")
@@ -135,11 +146,8 @@ def _print_table(title, data, footer_title, footer_value, name_width, size_width
     click.echo(f"{'-' * name_width}  {'-' * size_width}")
 
     # Body
-    data_dict = dict(data)
     for name, size in sorted(data, key=lambda item: item[1], reverse=True):
-        click.echo(
-            f"{name.ljust(name_width)}  {_format_size(size).rjust(size_width)}"
-        )
+        click.echo(f"{name.ljust(name_width)}  {_format_size(size).rjust(size_width)}")
 
     # Footer
     click.echo(f"{'-' * name_width}  {'-' * size_width}")
@@ -191,7 +199,9 @@ def cli(package_name, bin, python_version):
         # Determine column widths
         all_items = package_items + bin_items
         name_width = max((len(name) for name, size in all_items), default=0)
-        name_width = max(name_width, len("Total Package Size"), len("Total Binaries Size"))
+        name_width = max(
+            name_width, len("Total Package Size"), len("Total Binaries Size")
+        )
 
         all_sizes = [size for name, size in all_items] + [
             total_package_size,

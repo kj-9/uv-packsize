@@ -1,3 +1,5 @@
+import os
+
 from click.testing import CliRunner
 
 from uv_packsize.cli import cli
@@ -47,3 +49,25 @@ def test_uv_not_found(monkeypatch):
     result = runner.invoke(cli, ["iniconfig==2.0.0"])
     assert result.exit_code != 0
     assert "'uv' command not found" in result.output
+
+
+def test_python_version_option(monkeypatch):
+    """Test that the --python option is correctly passed."""
+    called_with_args = {}
+
+    def mock_create_venv(venv_dir, python=None):
+        called_with_args["venv_dir"] = venv_dir
+        called_with_args["python"] = python
+        return os.path.join(venv_dir, "bin", "python")
+
+    def mock_install_package(python_executable, package_name):
+        # Prevent the test from actually trying to install anything
+        pass
+
+    monkeypatch.setattr("uv_packsize.cli._create_venv", mock_create_venv)
+    monkeypatch.setattr("uv_packsize.cli._install_package", mock_install_package)
+
+    runner = CliRunner()
+    runner.invoke(cli, ["some-package", "--python", "3.11"])
+
+    assert called_with_args.get("python") == "3.11"
