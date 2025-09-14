@@ -29,4 +29,4 @@ ci-check:
 check: readme format lint typecheck test
 
 build:
-	uv build --frozen
+	uv build
