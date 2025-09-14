@@ -11,21 +11,22 @@ def test_version():
         assert result.output.startswith("cli, version ")
 
 
-def test_size_command_basic():
+def test_basic_package_size():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["size", "iniconfig"])
+        result = runner.invoke(cli, ["iniconfig==2.0.0"])
         assert result.exit_code == 0
         assert "iniconfig" in result.output
+        assert "Total size:" in result.output
         assert "MB" in result.output
 
 
-def test_size_command_non_existent_package():
+def test_non_existent_package():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["size", "non-existent-package-12345"])
+        result = runner.invoke(cli, ["non-existent-package-12345"])
         assert result.exit_code != 0
         assert (
-            "Could not find package" in result.output
+            "Error installing package" in result.output
             or "No solution found" in result.output
         )

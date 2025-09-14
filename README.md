@@ -28,16 +28,15 @@ cog.out(
 )
 ]]] -->
 ```bash
-Usage: uv-packsize [OPTIONS] COMMAND [ARGS]...
+Usage: uv-packsize [OPTIONS] PACKAGE_NAME
 
-  report size of python package with its deps using uv
+  Report the size of a Python package and its dependencies using uv.
 
 Options:
   --version  Show the version and exit.
+  --dev      Include development dependencies in the size calculation.
+  --bin      Include the size of binaries in the .venv/bin directory.
   --help     Show this message and exit.
-
-Commands:
-  size  Report the size of a Python package and its dependencies using uv.
 
 ```
 <!-- [[[end]]] -->
