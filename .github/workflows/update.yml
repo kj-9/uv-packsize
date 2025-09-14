@@ -1,0 +1,41 @@
+name: Update
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Runs every week
+  workflow_dispatch:
+
+permissions:
+  contents: write # for creating PR
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+    - name: Set up Python
+      uses: astral-sh/setup-uv@v6
+      with:
+        python-version: "3.13"
+        enable-cache: true
+    - name: Install dependencies
+      run: |
+        uv tool install copier
+    - name: Run copier update
+      run: |
+        copier update --skip-answered --defaults
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: run `copier update`
+        committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+        author: ${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>
+        branch: gh-action/update
+        title: Update by `copier update`
+        body: |
+          This PR was created by a GitHub Action triggered by a schedule.
+          It runs `copier update` to keep the project up-to-date.
+          Please review the changes and merge this PR if it looks good.

@@ -1,0 +1,7 @@
+_commit: 0.2.0
+_src_path: gh:kj-9/click-app-copier
+app_name: uv-packsize
+author_name: kj-9
+description: report size of python package with its deps using uv
+github_username: kj-9
+update: true

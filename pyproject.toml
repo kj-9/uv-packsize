@@ -1,0 +1,53 @@
+[project]
+name = "uv-packsize"
+version = "0.1.0a0"
+description = "report size of python package with its deps using uv"
+readme = "README.md"
+authors = [{name = "kj-9"}]
+license = "Apache-2.0"
+requires-python = ">=3.9"
+classifiers = []
+dependencies = [
+    "click"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+Homepage = "https://github.com/kj-9/uv-packsize"
+Changelog = "https://github.com/kj-9/uv-packsize/releases"
+Issues = "https://github.com/kj-9/uv-packsize/issues"
+CI = "https://github.com/kj-9/uv-packsize/actions"
+
+[project.scripts]
+uv-packsize = "uv_packsize.cli:cli"
+
+[dependency-groups]
+dev = [
+    "cogapp",
+    "pytest",
+    "ty",
+    "ruff",
+]
+
+
+# see also: https://beta.ruff.rs/docs/configuration/#using-pyprojecttoml
+[tool.ruff.lint]
+select = [
+    "E", "F", "I",
+    # "D", turn off requiring docstrings
+    "W", "PL", "B", "UP"
+]
+
+ignore = [
+    "E501", # ignore line length violations
+    "PLR2004" # ignore magic values, see also: https://docs.astral.sh/ruff/rules/magic-value-comparison/
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*__init__.py" = ["F401"] # ignore `E401` (unused import) in all `__init__.py` files
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
