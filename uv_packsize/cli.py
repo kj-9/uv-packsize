@@ -18,15 +18,7 @@ def get_dir_size(path):
 
 
 def _create_venv(venv_dir, python=None):
-    if python:
-        click.echo(
-            f"Creating virtual environment in {venv_dir} with Python {python}..."
-        )
-    else:
-        py_version = ".".join(map(str, sys.version_info[:3]))
-        click.echo(
-            f"Creating virtual environment in {venv_dir} with default Python ({py_version})..."
-        )
+    click.echo("Creating virtual environment...")
 
     command = ["uv", "venv"]
     if python:
