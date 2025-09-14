@@ -37,6 +37,6 @@ jobs:
         enable-cache: true
     - name: Build
       run: |
-        python -m build
+        make build
     - name: Publish
       uses: pypa/gh-action-pypi-publish@release/v1
