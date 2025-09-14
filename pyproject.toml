@@ -1,6 +1,6 @@
 [project]
 name = "uv-packsize"
-version = "0.1.0a1"
+version = "0.1.0"
 description = "report size of python package with its deps using uv"
 readme = "README.md"
 authors = [{name = "kj-9"}]
