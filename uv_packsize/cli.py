@@ -69,14 +69,21 @@ def _analyze_package_sizes(venv_dir):
         )
         sys.exit(1)
 
-    package_sizes = {}
+    aggregated_sizes = {}
     for item in os.listdir(site_packages_dir):
         item_path = os.path.join(site_packages_dir, item)
         if os.path.isdir(item_path):
             size = get_dir_size(item_path)
             if size > 0:
-                package_sizes[item] = size
-    return package_sizes
+                if item.endswith(".dist-info"):
+                    # Extract package name from dist-info (e.g., 'numpy-1.23.4.dist-info' -> 'numpy')
+                    package_name = item.split("-")[0]
+                    aggregated_sizes[package_name] = (
+                        aggregated_sizes.get(package_name, 0) + size
+                    )
+                else:
+                    aggregated_sizes[item] = aggregated_sizes.get(item, 0) + size
+    return aggregated_sizes
 
 
 def _analyze_binary_sizes(venv_dir):
