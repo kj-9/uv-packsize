@@ -32,16 +32,16 @@ def _create_venv(venv_dir, python=None):
     return python_executable
 
 
-def _install_package(python_executable, package_name):
-    click.echo(f"Installing {package_name} and its dependencies...")
+def _install_package(python_executable, package_names):
+    click.echo(f"Installing {', '.join(package_names)} and its dependencies...")
     install_command = [
         "uv",
         "pip",
         "install",
         "--python",
         python_executable,
-        package_name,
     ]
+    install_command.extend(package_names)
 
     result = subprocess.run(
         install_command,
@@ -49,7 +49,7 @@ def _install_package(python_executable, package_name):
         capture_output=True,
     )
     if result.returncode != 0:
-        click.echo(f"Error installing package: {package_name}", err=True)
+        click.echo(f"Error installing packages: {', '.join(package_names)}", err=True)
         click.echo(f"uv pip install stdout: {result.stdout.decode().strip()}", err=True)
         click.echo(f"uv pip install stderr: {result.stderr.decode().strip()}", err=True)
         sys.exit(result.returncode)
@@ -157,7 +157,7 @@ def _print_table(  # noqa: PLR0913
 
 @click.command()
 @click.version_option()
-@click.argument("package_name")
+@click.argument("package_names", nargs=-1)
 @click.option(
     "--bin",
     is_flag=True,
@@ -169,7 +169,7 @@ def _print_table(  # noqa: PLR0913
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
-def cli(package_name, bin, python_version):
+def cli(package_names, bin, python_version):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
         click.echo(
@@ -179,12 +179,12 @@ def cli(package_name, bin, python_version):
         )
         sys.exit(1)
 
-    click.echo(f"Calculating size for {package_name}...")
+    click.echo(f"Calculating size for {', '.join(package_names)}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         python_executable = _create_venv(venv_dir, python_version)
-        _install_package(python_executable, package_name)
+        _install_package(python_executable, package_names)
 
         click.echo("Analyzing sizes...")
         package_sizes = _analyze_package_sizes(venv_dir)

@@ -71,3 +71,13 @@ def test_python_version_option(monkeypatch):
     runner.invoke(cli, ["some-package", "--python", "3.11"])
 
     assert called_with_args.get("python") == "3.11"
+
+
+def test_multiple_packages():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["iniconfig==2.0.0", "six"])
+        assert result.exit_code == 0
+        assert "iniconfig" in result.output
+        assert "six" in result.output
+        assert "Total size:" in result.output
