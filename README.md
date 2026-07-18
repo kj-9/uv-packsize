@@ -36,7 +36,7 @@ cog.out(
 )
 ]]] -->
 ```bash
-Usage: uv-packsize [OPTIONS] [PACKAGE_NAMES]...
+Usage: uv-packsize [OPTIONS] PACKAGE_NAMES...
 
   Report the size of a Python package and its dependencies using uv.
 
@@ -76,12 +76,12 @@ Analyzing sizes...
 --- Package Sizes ---
 Package                  Size
 -------------------  --------
+six                  37.25 KB
 iniconfig            12.88 KB
-six                   3.36 KB
 -------------------  --------
-Total Package Size   16.24 KB
+Total Package Size   50.13 KB
 
-Total size:          16.24 KB
+Total size:          50.13 KB
 
 Calculation complete.
 ```

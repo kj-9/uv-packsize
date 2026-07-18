@@ -1,20 +1,13 @@
+import csv
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from email.parser import BytesParser
+from pathlib import Path
 
 import click
-
-
-def get_dir_size(path):
-    total_size = 0
-    for dirpath, _dirnames, filenames in os.walk(path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            if not os.path.islink(fp):
-                total_size += os.path.getsize(fp)
-    return total_size
 
 
 def _create_venv(venv_dir, python=None):
@@ -55,34 +48,68 @@ def _install_package(python_executable, package_names):
         sys.exit(result.returncode)
 
 
-def _analyze_package_sizes(venv_dir):
-    site_packages_dir = None
+def _find_site_packages(venv_dir):
     for root, dirs, _files in os.walk(venv_dir):
         if "site-packages" in dirs:
-            site_packages_dir = os.path.join(root, "site-packages")
-            break
+            return Path(root, "site-packages")
 
-    if not site_packages_dir:
-        click.echo(
-            "Could not find site-packages directory in the virtual environment.",
-            err=True,
-        )
-        sys.exit(1)
+    raise click.ClickException(
+        "Could not find site-packages in the virtual environment."
+    )
+
+
+def _distribution_name(dist_info_dir):
+    metadata_path = dist_info_dir / "METADATA"
+    if metadata_path.is_file():
+        with metadata_path.open("rb") as metadata_file:
+            name = BytesParser().parse(metadata_file).get("Name")
+        if name:
+            return name
+
+    # A fallback for malformed installations without METADATA. The directory name
+    # is normally `{normalized_name}-{version}.dist-info`.
+    stem = dist_info_dir.name.removesuffix(".dist-info")
+    return stem.rsplit("-", 1)[0]
+
+
+def _record_files(dist_info_dir, site_packages_dir):
+    record_path = dist_info_dir / "RECORD"
+    if not record_path.is_file():
+        return [path for path in dist_info_dir.rglob("*") if path.is_file()]
+
+    files = []
+    with record_path.open(newline="", encoding="utf-8") as record_file:
+        for relative_path, *_rest in csv.reader(record_file):
+            path = (site_packages_dir / relative_path).resolve()
+            try:
+                path.relative_to(site_packages_dir.resolve())
+            except ValueError:
+                # Console scripts are recorded as paths outside site-packages and
+                # are reported separately by --bin.
+                continue
+            if path.is_file():
+                files.append(path)
+                if path.suffix == ".py":
+                    files.extend(path.parent.glob(f"__pycache__/{path.stem}.*.pyc"))
+    return files
+
+
+def _analyze_package_sizes(venv_dir):
+    site_packages_dir = _find_site_packages(venv_dir)
 
     aggregated_sizes = {}
-    for item in os.listdir(site_packages_dir):
-        item_path = os.path.join(site_packages_dir, item)
-        if os.path.isdir(item_path):
-            size = get_dir_size(item_path)
-            if size > 0:
-                if item.endswith(".dist-info"):
-                    # Extract package name from dist-info (e.g., 'numpy-1.23.4.dist-info' -> 'numpy')
-                    package_name = item.split("-")[0]
-                    aggregated_sizes[package_name] = (
-                        aggregated_sizes.get(package_name, 0) + size
-                    )
-                else:
-                    aggregated_sizes[item] = aggregated_sizes.get(item, 0) + size
+    for dist_info_dir in site_packages_dir.glob("*.dist-info"):
+        package_name = _distribution_name(dist_info_dir)
+        # RECORD is the authoritative mapping between distributions and installed
+        # files. A set prevents malformed manifests from double-counting entries.
+        size = sum(
+            path.stat().st_size
+            for path in set(_record_files(dist_info_dir, site_packages_dir))
+        )
+        if size > 0:
+            aggregated_sizes[package_name] = (
+                aggregated_sizes.get(package_name, 0) + size
+            )
     return aggregated_sizes
 
 
@@ -157,7 +184,7 @@ def _print_table(  # noqa: PLR0913
 
 @click.command()
 @click.version_option()
-@click.argument("package_names", nargs=-1)
+@click.argument("package_names", nargs=-1, required=True)
 @click.option(
     "--bin",
     is_flag=True,

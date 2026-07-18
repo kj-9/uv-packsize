@@ -2,7 +2,7 @@ import os
 
 from click.testing import CliRunner
 
-from uv_packsize.cli import cli
+from uv_packsize.cli import _analyze_package_sizes, cli
 
 
 def test_version():
@@ -36,7 +36,7 @@ def test_non_existent_package():
 def test_bin_option():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["uv-packsize==0.1.0a0", "--bin"])
+        result = runner.invoke(cli, ["uv-packsize==0.1.1", "--bin"])
         assert result.exit_code == 0
         assert "uv-packsize" in result.output
         assert "Total Binaries Size" in result.output
@@ -81,3 +81,63 @@ def test_multiple_packages():
         assert "iniconfig" in result.output
         assert "six" in result.output
         assert "Total size:" in result.output
+
+
+def test_package_sizes_use_distribution_record(tmp_path):
+    site_packages = tmp_path / "venv" / "lib" / "python3.13" / "site-packages"
+    dist_info = site_packages / "example_package-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (site_packages / "example.py").write_bytes(b"module contents")
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: example-package\nVersion: 1.0\n"
+    )
+    (dist_info / "RECORD").write_text(
+        "example.py,,\nexample_package-1.0.dist-info/METADATA,,\n"
+        "example_package-1.0.dist-info/RECORD,,\n"
+        "../../../bin/example,,\n"
+    )
+
+    sizes = _analyze_package_sizes(tmp_path / "venv")
+
+    assert sizes == {
+        "example-package": sum(
+            path.stat().st_size
+            for path in [
+                site_packages / "example.py",
+                dist_info / "METADATA",
+                dist_info / "RECORD",
+            ]
+        )
+    }
+
+
+def test_package_sizes_include_bytecode_for_standalone_modules(tmp_path):
+    site_packages = tmp_path / "venv" / "Lib" / "site-packages"
+    dist_info = site_packages / "six-1.0.dist-info"
+    pycache = site_packages / "__pycache__"
+    dist_info.mkdir(parents=True)
+    pycache.mkdir()
+    (site_packages / "six.py").write_bytes(b"source")
+    (pycache / "six.cpython-313.pyc").write_bytes(b"compiled")
+    (dist_info / "METADATA").write_text("Name: six\nVersion: 1.0\n")
+    (dist_info / "RECORD").write_text("six.py,,\n")
+
+    sizes = _analyze_package_sizes(tmp_path / "venv")
+
+    assert sizes["six"] == len(b"source") + len(b"compiled")
+
+
+def test_package_name_falls_back_when_metadata_is_missing(tmp_path):
+    site_packages = tmp_path / "venv" / "Lib" / "site-packages"
+    dist_info = site_packages / "my_package-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "RECORD").write_text("my_package-1.0.dist-info/RECORD,,\n")
+
+    assert _analyze_package_sizes(tmp_path / "venv").keys() == {"my_package"}
+
+
+def test_package_name_is_required():
+    result = CliRunner().invoke(cli, [])
+
+    assert result.exit_code != 0
+    assert "Missing argument 'PACKAGE_NAMES...'" in result.output
