@@ -11,23 +11,15 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 from uv_packsize.models import (
     AnalysisWarning,
+    CaseRule,
     DistributionResult,
     FileCategory,
     FileEntry,
     FileOrigin,
+    PathFlavor,
     WarningCode,
     WarningTargetKind,
 )
-
-
-class PathFlavor(str, Enum):
-    POSIX = "posix"
-    WINDOWS = "windows"
-
-
-class CaseRule(str, Enum):
-    SENSITIVE = "sensitive"
-    INSENSITIVE = "insensitive"
 
 
 class InventoryScanErrorCode(str, Enum):

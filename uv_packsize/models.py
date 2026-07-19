@@ -111,6 +111,20 @@ class BuildPolicy(str, Enum):
     ALLOW_BUILD = "allow-build"
 
 
+class PathFlavor(str, Enum):
+    """Lexical path semantics used by the measured target environment."""
+
+    POSIX = "posix"
+    WINDOWS = "windows"
+
+
+class CaseRule(str, Enum):
+    """Case comparison rule used for canonical installed-file identities."""
+
+    SENSITIVE = "sensitive"
+    INSENSITIVE = "insensitive"
+
+
 class WarningCode(str, Enum):
     """Machine-readable conditions that affect an analysis."""
 
@@ -254,6 +268,8 @@ class ResolutionContext:
     python_version: str
     platform: str
     architecture: str
+    path_flavor: PathFlavor
+    case_rule: CaseRule
     uv_version: str
     build_policy: BuildPolicy
     compile_bytecode: bool
@@ -275,6 +291,10 @@ class ResolutionContext:
             "resolution_strategy",
         ):
             _require_non_empty(getattr(self, field_name), field_name)
+        if not isinstance(self.path_flavor, PathFlavor):
+            raise TypeError("path_flavor must be a PathFlavor")
+        if not isinstance(self.case_rule, CaseRule):
+            raise TypeError("case_rule must be a CaseRule")
         object.__setattr__(
             self,
             "extras",

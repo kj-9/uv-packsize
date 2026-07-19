@@ -7,12 +7,14 @@ from uv_packsize.models import (
     AnalysisResult,
     AnalysisWarning,
     BuildPolicy,
+    CaseRule,
     Completeness,
     DistributionResult,
     DuplicateOwnership,
     FileCategory,
     FileEntry,
     FileOrigin,
+    PathFlavor,
     ResolutionContext,
     WarningCode,
     WarningTargetKind,
@@ -25,6 +27,8 @@ def context(**overrides: Any) -> ResolutionContext:
         "python_version": "3.12.4",
         "platform": "linux",
         "architecture": "x86_64",
+        "path_flavor": PathFlavor.POSIX,
+        "case_rule": CaseRule.SENSITIVE,
         "uv_version": "0.11.3",
         "build_policy": BuildPolicy.ALLOW_BUILD,
         "compile_bytecode": True,
@@ -293,6 +297,18 @@ def test_distribution_rejects_empty_version():
 def test_resolution_context_rejects_empty_values(overrides, message):
     with pytest.raises(ValueError, match=message):
         context(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("path_flavor", "posix", "PathFlavor"),
+        ("case_rule", "sensitive", "CaseRule"),
+    ],
+)
+def test_resolution_context_rejects_untyped_path_semantics(field, value, message):
+    with pytest.raises(TypeError, match=message):
+        context(**{field: value})
 
 
 def test_resolution_context_preserves_requirements_and_canonicalizes_sets():

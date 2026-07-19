@@ -1198,6 +1198,8 @@ def test_record_and_discovered_shared_ownership_builds_analysis_result(tmp_path)
             python_version="3.12",
             platform="linux",
             architecture="x86_64",
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
             uv_version="test",
             build_policy=BuildPolicy.WHEEL_ONLY,
             compile_bytecode=True,
