@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 1: リリース品質の回復 |
 | `in_progress` | なし |
-| 次のタスク | P1-02: リリース対象メタデータの更新 |
-| Phase 1進捗 | 1 / 9 完了 |
+| 次のタスク | P1-05: subprocessエラー処理の統一 |
+| Phase 1進捗 | 4 / 9 完了 |
 | Blocker | なし |
-| 次の成果物 | version、Pythonサポート範囲、project metadataの更新 |
+| 次の成果物 | tracebackを表示しないsubprocessエラー処理 |
 
 ## ステータス定義
 
@@ -89,9 +89,9 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 | ID | タスク | 状態 | 依存 | 完了条件 |
 |---|---|---|---|---|
 | P1-01 | 現在のversion、lock、CI、テスト状態を基準化する | `done` | - | ベースラインと不整合が作業記録に残っている |
-| P1-02 | リリース対象メタデータを更新する | `todo` | P1-01 | versionが`0.1.2`、Python方針が明示され、metadata testがある |
-| P1-03 | lockとローカル実行を厳格化する | `todo` | P1-02 | `uv.lock`が同期し、通常チェックが`--locked`を使う |
-| P1-04 | CIのlock検証とPython matrixを更新する | `todo` | P1-03 | stale lockで失敗し、Python 3.10〜3.14を検証する |
+| P1-02 | リリース対象メタデータを更新する | `done` | P1-01 | versionが`0.1.2`、Python方針が明示され、metadata testがある |
+| P1-03 | lockとローカル実行を厳格化する | `done` | P1-02 | `uv.lock`が同期し、通常チェックが`--locked`を使う |
+| P1-04 | CIのlock検証とPython matrixを更新する | `done` | P1-03 | stale lockで失敗し、Python 3.10〜3.14を検証する |
 | P1-05 | subprocessエラー処理を統一する | `todo` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
 | P1-06 | 測定契約と安全性をREADMEへ記載する | `todo` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
 | P1-07 | Phase 1変更のテストを補強する | `todo` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
@@ -100,7 +100,7 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 
 ### P1-02 実施内容
 
-次に着手するタスク。
+完了したタスク。
 
 予定する変更:
 
@@ -113,6 +113,27 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 
 - `uv.lock`の同期はP1-03で行う。
 - 公開やGit tag作成は、この計画の完了には含めない。明示的な依頼がある場合だけ行う。
+
+### P1-03 実施内容
+
+完了したタスク。
+
+変更:
+
+- `uv.lock`をproject metadataと現在の依存解決結果へ同期する。
+- 通常のローカルチェックを`uv run --locked`へ移行し、stale lockを拒否する。
+- `make sync`は開発環境とlockを意図的に同期する入口として維持する。
+- makefileのlock運用境界を検証する回帰テストを追加する。
+
+### P1-04 実施内容
+
+完了したタスク。
+
+変更:
+
+- CIのtest matrixをPython 3.10〜3.14へ更新する。
+- 独立したlock jobで`uv lock --check`を実行し、stale lockを明示的に拒否する。
+- CIのmatrixとlock checkを検証する回帰テストを追加する。
 
 ## Phase 2以降の入口タスク
 
@@ -127,6 +148,111 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ## 作業記録
+
+### 2026-07-19: P1-04 CIのlock検証とPython matrixの更新
+
+状態: `done`
+
+変更:
+
+- CIのtest matrixからPython 3.9を除外し、Python 3.10〜3.14を明示した。
+- 独立した`lock` jobを追加し、`uv lock --check`でstale lockを検出する構成にした。
+- lock生成・ローカル検証に使用したuv `0.11.3`を、lock、test、lintの全jobで明示的に固定した。
+- CIのtest matrixが3.10〜3.14の完全一致であることと、独立したlock jobにlock checkが存在することをstdlibだけで検証するテストを追加した。
+- lock、test、lintの3 jobが同じuv version pinを持つことを回帰テストで検証した。
+- publish workflowは変更せず、残っているPython 3.9〜3.13 matrixをF-006としてP1-08へ割り当てた。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_uv_packsize.py::test_ci_checks_lock_and_supported_python_versions -q
+ruby -e 'require "yaml"; YAML.safe_load(File.read(".github/workflows/ci.yml"), [], [], true)'
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- CI契約テストは成功した。
+- CI workflowがYAMLとしてparseできることを確認した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全14テストが成功した。
+- `uv lock --check`は成功した。
+- whitespace errorはなかった。
+
+未検証事項:
+
+- GitHub Actions上でのworkflow実走はローカルでは未検証。次回pushまたはpull requestで確認する。
+
+### 2026-07-19: P1-03 lockとローカル実行の厳格化
+
+状態: `done`
+
+変更:
+
+- `uv.lock`を更新し、`requires-python = ">=3.10"`とproject version `0.1.2`をproject metadataへ一致させた。
+- Python 3.9向けの解決分岐が不要になったため、Click 8.1.8と関連するresolution markersがlockから削除された。
+- versionを固定していない開発依存`ty`は、lock再生成時点の解決結果である`0.0.61`へ更新された。
+- makefileの`UV_RUN`を`uv run --frozen`から`uv run --locked`へ変更した。
+- `make sync`は開発環境とlockを意図的に同期する入口として`uv sync`のまま維持した。
+- 通常チェックが`--locked`を使い、`make sync`の役割が維持されることを検証するテストを追加した。
+
+検証:
+
+```bash
+uv lock --check
+uv run --locked pytest tests/test_uv_packsize.py::test_project_metadata tests/test_uv_packsize.py::test_makefile_uses_locked_uv_runs tests/test_uv_packsize.py::test_version -q
+make ci-check
+make test
+git diff --check
+```
+
+結果:
+
+- `uv lock --check`は成功し、project metadataとlockの同期を確認した。
+- P1-03の対象テスト3件は成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて`--locked`実行で成功した。
+- 全13テストが`--locked`実行で成功した。
+- whitespace errorはなかった。
+
+後続作業:
+
+- CIでの独立した`uv lock --check`とPython 3.10〜3.14 matrixはP1-04で追加する。
+
+### 2026-07-19: P1-02 リリース対象メタデータの更新
+
+状態: `done`
+
+変更:
+
+- project versionを`0.1.2`へ更新した。
+- `requires-python`を`>=3.10`へ更新した。
+- Python 3 only、およびPython 3.10〜3.14のclassifiersを追加した。
+- project metadataのversion、Python要件、対応version classifiersを検証するテストを追加した。
+- CLIの`--version`が`uv-packsize, version 0.1.2`を表示することを、別プロセスとテスト専用の`.dist-info`を使って検証した。これにより、既存環境のstale metadataとClick callbackのversion cacheへ依存しない。
+
+検証:
+
+```bash
+uv run --frozen pytest tests/test_uv_packsize.py -q
+make ci-check
+make test
+git diff --check
+```
+
+結果:
+
+- 対象テストは12件すべて成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全12テストが成功した。
+- whitespace errorはなかった。
+
+既知の未完了事項:
+
+- `uv.lock`はP1-03の範囲であるため、このタスクでは同期していない。
+- P1-02完了時点では、`uv lock --check`はstale lockにより失敗していた。P1-03で同期とローカル実行の厳格化を完了した。
 
 ### 2026-07-19: P1-01 ベースライン調査
 
@@ -186,3 +312,4 @@ git diff --check
 | F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
 | F-004 | 通常テストがPyPIとresolverの文言に依存している | Phase 2 | `todo` |
 | F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 1/2 | `todo` |
+| F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `todo` |

@@ -1,6 +1,6 @@
 .PHONY: format lint typecheck test check ci-check build
 
-UV_RUN=uv run --frozen
+UV_RUN=uv run --locked
 
 sync:
 	uv sync

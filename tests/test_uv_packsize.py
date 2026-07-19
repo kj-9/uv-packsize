@@ -1,16 +1,120 @@
 import os
+import re
+import subprocess
+import sys
+from pathlib import Path
 
 from click.testing import CliRunner
 
 from uv_packsize.cli import _analyze_package_sizes, cli
 
+EXPECTED_VERSION = "0.1.2"
+PROJECT_ROOT = Path(__file__).parent.parent
 
-def test_version():
-    runner = CliRunner()
-    with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["--version"], prog_name="uv-packsize")
-        assert result.exit_code == 0
-        assert result.output.startswith("uv-packsize, version ")
+
+def test_project_metadata():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
+    project = pyproject.partition("[project]")[2].partition("\n[")[0]
+
+    assert re.search(r'^version = "0\.1\.2"$', project, re.MULTILINE)
+    assert re.search(r'^requires-python = ">=3\.10"$', project, re.MULTILINE)
+
+    classifier_block = re.search(
+        r"^classifiers = \[(.*?)^\]$", project, re.MULTILINE | re.DOTALL
+    )
+    assert classifier_block is not None
+    python_classifiers = {
+        classifier
+        for classifier in re.findall(r'"([^"]+)"', classifier_block.group(1))
+        if classifier.startswith("Programming Language :: Python ::")
+    }
+    assert "Programming Language :: Python :: 3 :: Only" in python_classifiers
+    assert python_classifiers - {"Programming Language :: Python :: 3 :: Only"} == {
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    }
+
+
+def test_makefile_uses_locked_uv_runs():
+    makefile = (PROJECT_ROOT / "makefile").read_text()
+
+    assert re.search(r"^UV_RUN=uv run --locked$", makefile, re.MULTILINE)
+    assert re.search(r"^sync:\n\tuv sync$", makefile, re.MULTILINE)
+
+
+def test_ci_checks_lock_and_supported_python_versions():
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    job_pattern = r"^  {job}:\n(?P<body>.*?)(?=^  [a-z][a-z-]*:\n|\Z)"
+
+    test_job = re.search(
+        job_pattern.format(job="test"), workflow, re.MULTILINE | re.DOTALL
+    )
+    assert test_job is not None
+    matrix = re.search(
+        r"^\s+python-version: \[(?P<versions>[^]]+)\]$",
+        test_job.group("body"),
+        re.MULTILINE,
+    )
+    assert matrix is not None
+    assert re.findall(r'"([^"]+)"', matrix.group("versions")) == [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
+
+    lock_job = re.search(
+        job_pattern.format(job="lock"), workflow, re.MULTILINE | re.DOTALL
+    )
+    assert lock_job is not None
+    assert re.search(r"^\s+run: uv lock --check$", lock_job.group("body"), re.MULTILINE)
+
+    for job in [lock_job, test_job]:
+        assert re.findall(
+            r'^\s+version: "([^"]+)"$', job.group("body"), re.MULTILINE
+        ) == ["0.11.3"]
+
+    lint_job = re.search(
+        job_pattern.format(job="lint"), workflow, re.MULTILINE | re.DOTALL
+    )
+    assert lint_job is not None
+    assert re.findall(
+        r'^\s+version: "([^"]+)"$', lint_job.group("body"), re.MULTILINE
+    ) == ["0.11.3"]
+
+
+def test_version(tmp_path):
+    dist_info = tmp_path / f"uv_packsize-{EXPECTED_VERSION}.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: uv-packsize\nVersion: {EXPECTED_VERSION}\n"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(PROJECT_ROOT)])
+
+    # A separate process and test-owned dist-info avoid both Click's callback
+    # cache and metadata left in the active environment by a previous install.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from uv_packsize.cli import cli; cli(prog_name='uv-packsize')",
+            "--version",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == f"uv-packsize, version {EXPECTED_VERSION}\n"
+    assert result.stderr == ""
 
 
 def test_basic_package_size():
