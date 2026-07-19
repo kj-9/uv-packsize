@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 1: リリース品質の回復 |
 | `in_progress` | なし |
-| 次のタスク | P1-06: 測定契約と安全性のREADME記載 |
-| Phase 1進捗 | 5 / 9 完了 |
+| 次のタスク | P1-07: Phase 1変更のテスト補強 |
+| Phase 1進捗 | 6 / 9 完了 |
 | Blocker | なし |
-| 次の成果物 | 含有範囲、単位、platform依存、sdistリスクの公開契約 |
+| 次の成果物 | release metadata、lock、error pathの回帰テスト補強 |
 
 ## ステータス定義
 
@@ -82,7 +82,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | P0-03 | プロダクトの中心目的を定義する | `done` | installed footprint、diff、budgetを中心とする方針が記録されている |
 | P0-04 | 実行計画とエージェント運用規則を作成する | `done` | 本文書と[`AGENTS.md`](../AGENTS.md)が存在し、相互に参照できる |
 
-Phase 0で定義した測定契約は現時点では設計案である。CLIの公開契約として確定させる作業はP1-06で行う。
+Phase 0で定義した将来の測定契約は設計案である。P1-06では、現在の実装が提供する測定契約と既知の制約をREADMEへ記載した。Phase 2で予定する変更を現行仕様と混同しない。
 
 ## Phase 1: リリース品質の回復
 
@@ -93,7 +93,7 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 | P1-03 | lockとローカル実行を厳格化する | `done` | P1-02 | `uv.lock`が同期し、通常チェックが`--locked`を使う |
 | P1-04 | CIのlock検証とPython matrixを更新する | `done` | P1-03 | stale lockで失敗し、Python 3.10〜3.14を検証する |
 | P1-05 | subprocessエラー処理を統一する | `done` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
-| P1-06 | 測定契約と安全性をREADMEへ記載する | `todo` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
+| P1-06 | 測定契約と安全性をREADMEへ記載する | `done` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
 | P1-07 | Phase 1変更のテストを補強する | `todo` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
 | P1-08 | distribution artifactを検証する | `todo` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
 | P1-09 | Phase 1総合検証と引き継ぎを行う | `todo` | P1-08 | 全検証が成功し、Phase 2の最初のタスクが具体化されている |
@@ -147,6 +147,18 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 - uv未検出を含む失敗でPython tracebackを表示せず、簡潔な診断をstderrへ出す。
 - subprocess失敗時の公開CLI契約をREADMEへ記載する。
 
+### P1-06 実施内容
+
+完了したタスク。
+
+変更:
+
+- 現行実装の測定手順、含有範囲、除外範囲をREADMEへ記載する。
+- `--bin`の集計対象とdistribution ownershipへ帰属しないことを明示する。
+- site-packages外の`RECORD` path、Windows `Scripts`、`RECORD`欠損時fallback、単位表記の既知制約を記載する。
+- Python、platform、extras、dependency resolutionによる結果差と、複数root packageの帰属情報がないことを明示する。
+- sdist build backend実行リスク、wheel-only未実装、一時venvへ限定したinstallを安全性契約として記載する。
+
 ## Phase 2以降の入口タスク
 
 Phase 1完了時に詳細分解する。現時点の入口は以下とする。
@@ -160,6 +172,46 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ## 作業記録
+
+### 2026-07-19: P1-06 測定契約と安全性のREADME記載
+
+状態: `done`
+
+文書構造:
+
+- READMEに`Measurement`を追加し、一時venvへのinstall、`RECORD`を所有権根拠とするlogical bytes集計、`.pyc`の扱いを記載した。
+- デフォルトでPython interpreter、venv基礎ファイル、uv cache、site-packages外の所有ファイルを含めないことを記載した。
+- `--bin`はUnix形式の`bin`にある通常ファイルを別集計し、distributionへ帰属しないことを記載した。
+- `Current limitations`と`Installation safety`を分け、現在の挙動と将来の改善予定を区別した。
+
+既知の制約:
+
+- site-packages外のscripts/data/headersとWindows `Scripts`は現在の集計対象外。
+- `RECORD`欠損時は`.dist-info`内だけをfallback集計し、不完全性を出力へ示さない。
+- 1024基準の値を現行出力では`KB`/`MB`と表示しており、Phase 2で`KiB`/`MiB`へ修正予定。
+- logical bytesはcompressed archive sizeやfilesystem allocated blocksではなく、hardlink等の物理共有による節約を反映しない。
+- `RECORD`記載fileの欠損は黙って除外し、distribution間の重複所有をglobal totalでdeduplicateまたはwarning表示しない。
+- Python、platform、extras、dependency resolutionが異なる結果は直接比較できない。
+- 複数root packagesのshared dependencyは通常1環境へ1度installされるためcombined totalでは通常1度だが、direct/transitive/sharedの区別とroot別寄与を表示しない。
+- 現行text出力はresolved versions、Python/platform、uv version、index/resolver条件、完全性を保存せず、再現可能な分析recordではない。
+- wheel-only defaultは未実装で、direct sdist/pathや互換wheel不在などresolutionがsdistを選択した場合は第三者のbuild backendを実行し得る。
+- 一時venvはinstall先の隔離であってsecurity sandboxではなく、build codeは実行user権限で外部filesystemやnetworkへ作用し得る。
+
+検証:
+
+```bash
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全19テストが成功した。
+- `uv lock --check`は成功した。
+- whitespace errorはなかった。
 
 ### 2026-07-19: P1-05 subprocessエラー処理の統一
 
