@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-04b: CLIを新測定engineとrendererへ接続する |
+| 次のタスク | P2-04b2: CLIを新測定engineとrendererへ接続し、公開text契約を移行する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 5タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a `done`） |
+| Phase 2進捗 | 6タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1 `done`） |
 | Blocker | なし |
-| 次の成果物 | 新測定engineを使用するCLI/renderer接続 |
+| 次の成果物 | 新測定engineとrendererを使用するCLI接続 |
 
 ## ステータス定義
 
@@ -206,7 +206,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-02b | Phase 2 | 全distribution scanと明示的なsupplemental discoveryを実装する | `done` |
 | P2-03 | Phase 2 | installed environmentの測定contextとinventoryを`AnalysisResult`へ接続する | `done` |
 | P2-04a | Phase 2 | temporary venvから測定contextとinventory layoutを検出するadapterを実装する | `done` |
-| P2-04b | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `todo` |
+| P2-04b1 | Phase 2 | `AnalysisResult`のpure text rendererを実装する | `done` |
+| P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -339,7 +340,62 @@ P2-04へ送る事項:
 - physical pathとtarget logical pathを分離して`InventoryLayout`を構築し、同一のcompatible layoutはdedupeする。payload builderをfilesystem/subprocessから分離し、POSIX host上でもWindows logical layoutをunit testできる。
 - discovery failureはraw path、requirements、subprocess stdout/stderrを含まないtyped/sanitized errorで返す。CLI、uv command/version query、inventory analysis、rendererへの接続はP2-04bの責務とする。
 
+### P2-04b1: `AnalysisResult` pure text renderer
+
+目的:
+
+- immutableな`AnalysisResult`だけを入力に、filesystem、subprocess、network、Click出力へ依存しないdeterministicな完全text reportを生成する。
+
+固定した契約:
+
+- distribution rowは`DistributionResult.files`の`FileEntry` inventoryから導出し、defaultでは全categoryを含める。rowはlogical bytesの降順、同値はnormalized distribution nameの昇順で並べる。
+- reportの最終`Total size`はdistribution rowのsumではなく、`AnalysisResult.total_logical_bytes`を表示する。重複所有のためrow sumとglobal totalが異なる場合は、その理由を安全でdeterministicなsummaryとして説明する。
+- size unitは1024基準で`0 B`、`KiB`、`MiB`、`GiB`を使用する。
+- `show_scripts=True`ではpackage table/subtotalから`FileCategory.SCRIPT`を除外し、canonical identityでglobal dedupeしたscript filesだけを`Binaries in .venv/bin` tableへ出す。path labelはmeasurement prefix相対pathを使い、同名scriptの衝突を避ける。最終global totalを二重計上しない。
+- incomplete resultはraw pathやunsafe diagnosticsを出さず、typed warning codeごとの件数をdeterministicに要約する。empty resultもtable/footer/totalを含む安定したreportを返す。
+- CLI接続、progress lifecycle、uv execution、environment discovery、公開README契約の変更はP2-04b2の責務とする。
+
 ## 作業記録
+
+### 2026-07-19: P2-04b1 `AnalysisResult` pure text renderer
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/render.py`](../uv_packsize/render.py)を追加し、`AnalysisResult`だけからcompleteなdeterministic text reportを返す`render_analysis_report`を実装した。filesystem、subprocess、Click、networkには依存しない。
+- distribution rowは`FileEntry` inventoryから導出し、logical bytes降順・normalized name昇順で整列する。footerと最終totalはcanonical identityで重複排除されたglobal totalを使い、row sumとの差はduplicate-owned filesをglobalで一度だけ数える理由としてpathやownerを出さずに説明する。
+- `format_size`は1024基準で`B`、`KiB`、`MiB`、`GiB`を表示する。incomplete resultはtyped warning codeごとの件数だけをdeterministicに要約し、raw targetやdiagnosticsを出力しない。
+- `show_scripts=True`ではpackage row/subtotalから`SCRIPT`を除き、canonical-deduped script fileをprefix-relativeな`FileEntry.path`で`Binaries in .venv/bin` tableへ表示する。同じcanonical identityでdisplay caseが異なる場合も、pathをdeterministicに選択する。package/script footerの合計と最終global totalは一致し、scriptを二重計上しない。
+- `format_size`はboolを含むnon-intとnegative valueを明示的に拒否する。script split時のrow-total注記はdistribution rowだけでなくbinary rowも含むため、`displayed rows`と表現する。
+
+テスト:
+
+- [`tests/test_render.py`](../tests/test_render.py)を追加し、unit boundaryとinvalid input、同sizeのtie ordering、global dedupeとfooter、incomplete warningのsanitization、script split/dedupe、Windows case-insensitive styleのdisplay path選択、empty resultをnetwork・filesystem不要のfixtureで検証した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_render.py -q
+uv run --locked ruff format --check uv_packsize/render.py tests/test_render.py
+uv run --locked ruff check uv_packsize/render.py tests/test_render.py
+uv run --locked ty check
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused renderer testsは14件成功した。
+- Ruff format/lint、ty、README生成整合性、lock checkはすべて成功した。
+- 全test suiteは227件成功、1件skipした。
+- whitespace errorはなかった。
+
+スコープ境界:
+
+- CLI、uv execution、environment discovery、inventory analysis、READMEの公開text契約は未変更である。P2-04b2で既存temporary venv flowをmeasurement engineとrendererへ接続する。
 
 ### 2026-07-19: P2-04a temporary venv environment discovery adapter
 
