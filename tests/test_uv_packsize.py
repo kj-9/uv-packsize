@@ -86,6 +86,8 @@ def test_makefile_uses_locked_uv_runs():
 
     assert re.search(r"^UV_RUN=uv run --locked$", makefile, re.MULTILINE)
     assert re.search(r"^sync:\n\tuv sync$", makefile, re.MULTILINE)
+    assert re.search(r"^build:\n\tuv build --no-sources$", makefile, re.MULTILINE)
+    assert re.search(r"^verify-build: build$", makefile, re.MULTILINE)
 
 
 def test_ci_checks_lock_and_supported_python_versions():
@@ -128,6 +130,68 @@ def test_ci_checks_lock_and_supported_python_versions():
     assert re.findall(
         r'^\s+version: "([^"]+)"$', lint_job.group("body"), re.MULTILINE
     ) == ["0.11.3"]
+
+
+def test_publish_workflow_verifies_supported_release_artifacts():
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "publish.yml").read_text()
+    job_pattern = r"^  {job}:\n(?P<body>.*?)(?=^  [a-z][a-z-]*:\n|\Z)"
+
+    test_job = re.search(
+        job_pattern.format(job="test"), workflow, re.MULTILINE | re.DOTALL
+    )
+    deploy_job = re.search(
+        job_pattern.format(job="deploy"), workflow, re.MULTILINE | re.DOTALL
+    )
+    assert test_job is not None
+    assert deploy_job is not None
+
+    matrix = re.search(
+        r"^\s+python-version: \[(?P<versions>[^]]+)\]$",
+        test_job.group("body"),
+        re.MULTILINE,
+    )
+    assert matrix is not None
+    assert re.findall(r'"([^"]+)"', matrix.group("versions")) == [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
+
+    for job in [test_job, deploy_job]:
+        assert re.findall(
+            r'^\s+version: "([^"]+)"$', job.group("body"), re.MULTILINE
+        ) == ["0.11.3"]
+
+    assert re.search(r"^\s+needs: \[test\]$", deploy_job.group("body"), re.MULTILINE)
+    assert re.search(r"^\s+make verify-build$", deploy_job.group("body"), re.MULTILINE)
+    assert deploy_job.group("body").index("make verify-build") < deploy_job.group(
+        "body"
+    ).index("uses: pypa/gh-action-pypi-publish")
+
+
+def test_build_verifier_rejects_unexpected_publish_file(tmp_path):
+    (tmp_path / "uv_packsize-0.1.2-py3-none-any.whl").touch()
+    (tmp_path / "uv_packsize-0.1.2.tar.gz").touch()
+    unexpected = tmp_path / "uv_packsize-0.1.1-py3-none-any.whl"
+    unexpected.touch()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "verify_build.py"),
+            str(tmp_path),
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert unexpected.name in result.stderr
 
 
 def test_version(tmp_path):

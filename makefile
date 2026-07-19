@@ -1,4 +1,4 @@
-.PHONY: format lint typecheck test check ci-check build
+.PHONY: format lint typecheck test check ci-check build verify-build
 
 UV_RUN=uv run --locked
 
@@ -29,4 +29,7 @@ ci-check:
 check: readme format lint typecheck test
 
 build:
-	uv build
+	uv build --no-sources
+
+verify-build: build
+	$(UV_RUN) python scripts/verify_build.py dist

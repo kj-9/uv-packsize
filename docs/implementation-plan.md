@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 1: リリース品質の回復 |
 | `in_progress` | なし |
-| 次のタスク | P1-08: distribution artifactの検証 |
-| Phase 1進捗 | 7 / 9 完了 |
+| 次のタスク | P1-09: Phase 1総合検証と引き継ぎ |
+| Phase 1進捗 | 8 / 9 完了 |
 | Blocker | なし |
-| 次の成果物 | wheel/sdistとartifact metadata、CLI entry pointの検証 |
+| 次の成果物 | Phase 1総合検証結果とPhase 2への引き継ぎ |
 
 ## ステータス定義
 
@@ -95,7 +95,7 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 | P1-05 | subprocessエラー処理を統一する | `done` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
 | P1-06 | 測定契約と安全性をREADMEへ記載する | `done` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
 | P1-07 | Phase 1変更のテストを補強する | `done` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
-| P1-08 | distribution artifactを検証する | `todo` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
+| P1-08 | distribution artifactを検証する | `done` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
 | P1-09 | Phase 1総合検証と引き継ぎを行う | `todo` | P1-08 | 全検証が成功し、Phase 2の最初のタスクが具体化されている |
 
 ### P1-02 実施内容
@@ -171,6 +171,19 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 - `RECORD`欠損時にpackage本体を含めず`.dist-info`だけをfallback集計することを検証する。
 - network依存の存在しないpackage testを、P1-05で追加したmock resolver failure testへ置き換える。
 
+### P1-08 実施内容
+
+完了したタスク。
+
+変更:
+
+- `uv build --no-sources`でwheelとsdistをbuildする。
+- archiveを展開せずmetadata、critical files、entry point、安全なsdist構造を検証するstdlib scriptを追加する。
+- buildとartifact検証を再実行可能な`make verify-build`へまとめる。
+- publish対象inventoryに期待するwheelとsdist以外があれば、自動削除せず明示的に失敗する。
+- built wheelをworkspace外の一時directoryからisolated実行し、console entry pointのversionを検証する。
+- publish workflowのPython matrix、uv pinをCIと揃え、artifact検証後だけpublish stepへ進む構成にする。
+
 ## Phase 2以降の入口タスク
 
 Phase 1完了時に詳細分解する。現時点の入口は以下とする。
@@ -184,6 +197,61 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ## 作業記録
+
+### 2026-07-19: P1-08 distribution artifactの検証
+
+状態: `done`
+
+artifact検証:
+
+- `uv build --no-sources`で`dist/uv_packsize-0.1.2-py3-none-any.whl`と`dist/uv_packsize-0.1.2.tar.gz`をbuildした。
+- wheel/sdistのName `uv-packsize`、Version `0.1.2`、Requires-Python `>=3.10`をarchive内部metadataから検証した。
+- wheelのCRC、`Requires-Dist: click`、critical modules、`uv-packsize = uv_packsize.cli:cli` entry pointを検証した。
+- sdistはextractせず、single root、absolute pathと`..`の不在、link/device等の危険なmember type不在、pyproject/README/LICENSE/critical modulesを検証した。
+- publish対象inventoryは期待するwheel 1個とsdist 1個だけを許可し、stale version等のunexpected fileを自動削除せず失敗する。uvが生成するhidden `dist/.gitignore`はpublish対象外として扱う。
+- workspace外のtemporary directoryから`uv run --isolated --no-project --with <absolute wheel> -- uv-packsize --version`を実行し、exact `uv-packsize, version 0.1.2`を確認した。
+- hard-codeした期待metadataはP1-08の`0.1.2`専用であり、source側の値はP1-02/P1-07のproject metadataとlock一致テストで別途固定している。
+
+publish workflow:
+
+- test matrixをPython 3.10〜3.14へ更新し、test/deploy双方のuvを`0.11.3`へ固定した。
+- deployの`needs: [test]`を維持し、`make verify-build`成功後にpublish actionを実行する。
+- F-006を解消した。
+
+generated artifacts:
+
+- `dist/`をroot `.gitignore`へ追加した。
+- 検証で生成したwheel、sdist、uv生成の`dist/.gitignore`はignored fileとしてworkspaceに残した。既存artifactの削除は行っていない。
+
+検証:
+
+```bash
+make verify-build
+find dist -maxdepth 1 -type f -print | sort
+uv run --locked python -m zipfile -l dist/uv_packsize-0.1.2-py3-none-any.whl
+uv run --locked python -m tarfile -l dist/uv_packsize-0.1.2.tar.gz
+uv run --locked pytest tests/test_uv_packsize.py -q -k 'publish_workflow or build_verifier'
+make ci-check
+make test
+uv lock --check
+ruby -e 'require "yaml"; YAML.safe_load(File.read(".github/workflows/publish.yml"), aliases: true)'
+git diff --check
+```
+
+結果:
+
+- `make verify-build`は複数回成功し、wheel/sdist metadata、archive構造、installed entry pointを検証した。
+- wheelとsdistのfile listingを確認した。
+- P1-08のworkflow/inventory対象テスト2件は成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全25テストが成功した。
+- `uv lock --check`、publish workflowのYAML parse、whitespace checkは成功した。
+
+未検証・制約:
+
+- isolated wheel smokeはwheel自体を絶対pathで指定するが、依存`click`の解決にはuv cacheまたはpackage indexを利用し得る。
+- GitHub Actions上のpublish workflow実走と、release/PyPI publishは実施していない。
+- Phase 1の総合検証とPhase 2への引き継ぎはP1-09で行う。
 
 ### 2026-07-19: P1-07 Phase 1変更のテスト補強
 
@@ -476,4 +544,4 @@ git diff --check
 | F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
 | F-004 | 通常テストがPyPIとresolverの文言に依存している | Phase 2 | `todo` |
 | F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 1/2 | `todo` |
-| F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `todo` |
+| F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
