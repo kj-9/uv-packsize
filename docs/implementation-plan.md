@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-04b2: CLIを新測定engineとrendererへ接続し、公開text契約を移行する |
+| 次のタスク | P2-05: versioned JSON schemaとdeterministic JSON出力を実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 6タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1 `done`） |
+| Phase 2進捗 | 7 / 9タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2 `done`） |
 | Blocker | なし |
-| 次の成果物 | 新測定engineとrendererを使用するCLI接続 |
+| 次の成果物 | versioned JSON schemaとdeterministic JSON出力 |
 
 ## ステータス定義
 
@@ -207,7 +207,9 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-03 | Phase 2 | installed environmentの測定contextとinventoryを`AnalysisResult`へ接続する | `done` |
 | P2-04a | Phase 2 | temporary venvから測定contextとinventory layoutを検出するadapterを実装する | `done` |
 | P2-04b1 | Phase 2 | `AnalysisResult`のpure text rendererを実装する | `done` |
-| P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `todo` |
+| P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `done` |
+| P2-05 | Phase 2 | versioned JSON schemaとdeterministic JSON出力を実装する | `todo` |
+| P2-06 | Phase 2 | local wheel integration fixtureとcross-platform golden coverageを追加する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -355,7 +357,56 @@ P2-04へ送る事項:
 - incomplete resultはraw pathやunsafe diagnosticsを出さず、typed warning codeごとの件数をdeterministicに要約する。empty resultもtable/footer/totalを含む安定したreportを返す。
 - CLI接続、progress lifecycle、uv execution、environment discovery、公開README契約の変更はP2-04b2の責務とする。
 
+### P2-05: versioned JSON schemaとdeterministic JSON出力
+
+目的:
+
+- `AnalysisResult`からschema versionを含む機械可読なJSONを生成し、同一の入力・環境では明示的な可変項目を除いて安定した結果を返す。
+
+完了条件:
+
+- context、resolved distributions、file inventory、warnings/completeness、global totalをversioned schemaで表現する。
+- JSON rendererと公開CLI出力を同じresult modelに接続し、key/order/optional fieldのdeterminismをgolden testで検証する。
+- schema contract、JSON error/exit behavior、比較に必要なmeasurement contextをREADMEへ記載する。
+- requirementはcredential-bearing URLをrawのまま公開JSONへ出さないrepresentationを定義し、serialization testで非漏えいを検証する。
+
+### P2-06: local wheel integration fixtureとcross-platform golden coverage
+
+目的:
+
+- 通常の成功系testをpackage indexから分離し、local wheel installationとtarget layoutのgolden fixtureでPhase 2の測定契約を継続検証する。
+
+完了条件:
+
+- test-owned wheelとlocal `--find-links`を用い、resolver/installからJSON/text reportまでnetworkなしで検証する。
+- Linux、macOS、Windowsのscripts/data/headersを含むlayout golden testを追加し、PyPI smoke testは通常test suiteから分離する。
+- F-004の通常testにおけるPyPI/package index依存を解消する。
+
 ## 作業記録
+
+### 2026-07-19: P2-04b2 CLIを新測定engineとrendererへ接続
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/cli.py`](../uv_packsize/cli.py)で既存のtemporary venv作成・install flowの後に、`uv --version`を既存`_run_uv`経由で照会し、安全に検証したversion tokenを取得するようにした。実際のoptional build metadata付き出力を許容し、未知の出力はraw textを表示せず拒否する。`UvCommandError`は内部診断を保持するが、public Click messageにはstageとexit codeだけを出し、uv stdout/stderrを転記しない。進捗表示はrequirementsの値を使わず、requested package数だけを表示する。
+- temporary venvの実interpreter/prefixを`discover_installed_environment`へ渡し、requirements、`BuildPolicy.ALLOW_BUILD`、`compile_bytecode=False`、現在のextras/index/resolution defaultsを明示して、`analyze_installed_environment`を1回だけ実行するようにした。
+- text出力を`render_analysis_report`へ一元化し、`--bin`をRECORD-owned scriptの表示分離だけを行うpresentation optionへ移行した。final global totalは`--bin`の有無で変化しない。
+- legacyのsite-packages walk、CSV/metadata集計、bin再scan、独自table formatterを削除した。既知のdiscovery/inventory/analysis例外はCLI境界でsanitizedな`ClickException`へ変換し、programmer errorは捕捉しない。
+- READMEをprefix-wide RECORD ownership、global dedupe/incomplete warning、`KiB`/`MiB`単位、`--bin`の非加算契約へ更新した。sdist build safetyとreproducible JSON未提供の制約は維持した。
+
+テスト:
+
+- PyPI/networkへ依存するCLI success testを、実際のstdlib venvとそのprefix内に置くtest-owned installed layoutへ置換した。installerと`uv --version`だけをmockし、prefix-wide script/data ownership、resolved distribution表示、incomplete warning、duplicate ownership、`--bin`のtotal不変、analysis一回呼び出し、version failure、sanitized discovery/inventory/analysis failureを検証した。venv/install/version failureではcredential URL、一時path、command secret、raw diagnosticをpublic outputへ含めないことも検証した。
+
+検証:
+
+- `uv run --locked pytest tests/test_uv_packsize.py` — 27 passed
+- `make ci-check` — ruff format/lint、ty、README cog check成功
+- `make test` — 229 passed, 1 skipped
+- `uv lock --check` — 成功
+- `git diff --check` — whitespace errorなし
 
 ### 2026-07-19: P2-04b1 `AnalysisResult` pure text renderer
 

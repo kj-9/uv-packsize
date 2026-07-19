@@ -42,7 +42,8 @@ Usage: uv-packsize [OPTIONS] PACKAGE_NAMES...
 
 Options:
   --version          Show the version and exit.
-  --bin              Include the size of binaries in the .venv/bin directory.
+  --bin              Display RECORD-owned scripts separately without changing
+                     the total.
   -p, --python TEXT  Specify the Python version for the virtual environment.
   --help             Show this message and exit.
 
@@ -55,7 +56,8 @@ python -m uv_packsize --help
 ```
 
 If virtual environment creation or package installation fails, the command exits
-with status 1 and shows a concise `uv` diagnostic without a Python traceback.
+with status 1 and shows a concise failure summary with the `uv` exit code,
+without a Python traceback or raw `uv` diagnostic output.
 
 ### Example
 
@@ -71,20 +73,20 @@ You can also specify multiple packages to calculate the total size of all of the
 uv-packsize 'iniconfig==2.0.0' six
 ```
 ```bash
-Calculating size for iniconfig==2.0.0, six...
+Calculating size for 2 requested packages...
 Creating virtual environment...
-Installing iniconfig==2.0.0, six and its dependencies...
+Installing 2 requested packages and their dependencies...
 Analyzing sizes...
 
 --- Package Sizes ---
 Package                  Size
 -------------------  --------
-six                  37.25 KB
-iniconfig            12.88 KB
+six                  37.25 KiB
+iniconfig            12.88 KiB
 -------------------  --------
-Total Package Size   50.13 KB
+Total Package Size   50.13 KiB
 
-Total size:          50.13 KB
+Total size:          50.13 KiB
 
 Calculation complete.
 ```
@@ -97,51 +99,46 @@ the installed distributions. The environment is removed after the command
 finishes.
 
 For each distribution, its `.dist-info/RECORD` file is the source of file
-ownership. The default package total is the sum of the logical byte sizes
-reported by the filesystem for existing `RECORD` paths that resolve inside the
-environment's `site-packages`. Generated `.pyc` files matching recorded Python
-source files are also included when present.
+ownership. The measurement scope is the temporary environment prefix, not just
+`site-packages`: RECORD-owned scripts, data files, and headers are included
+when they resolve inside that prefix. Generated `.pyc` files matching recorded
+Python source files are also included when present.
 
 This is installed logical size: it is neither the compressed wheel or sdist
 size nor the number of filesystem blocks allocated on disk. It sums the
 filesystem-reported size of each included path and does not account for physical
 storage savings from hardlinks, clones, or similar sharing.
 
-The default total does not include:
+The final `Total size` is derived from the included file inventory. If two
+distributions claim the same installed file, that file is counted once in the
+global total and the text report explains the difference from the distribution
+rows. Missing RECORD files, missing installed files, malformed metadata, and
+similar conditions produce an incomplete-analysis warning rather than being
+silently treated as a complete result.
+
+The total does not include:
 
 - the Python interpreter or the virtual environment's base files;
 - the `uv` cache;
-- files recorded outside `site-packages`, including console scripts.
+- files not owned by an installed distribution's RECORD or conservative
+  metadata fallback.
 
-`--bin` separately scans regular, non-symlink files in the temporary
-environment's Unix-style `bin` directory, excluding activation and other known
-environment boilerplate scripts. It adds that separate binary total to the
-reported overall total. It does not assign those files back to their owning
-distributions.
+`--bin` is a presentation option. It moves RECORD-owned script files from the
+package table into a separate `Binaries in .venv/bin` table; it never changes
+the final global total or scans unowned virtual-environment boilerplate.
+Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 
 ### Current limitations
 
-- `RECORD` paths outside `site-packages`, such as scripts, data, and headers,
-  are currently skipped by the distribution analysis. Windows `Scripts` is not
-  scanned by `--bin`.
-- If a distribution has no `RECORD`, only files under its `.dist-info`
-  directory are used as a fallback. The output does not currently report that
-  the measurement is incomplete.
-- A path listed in `RECORD` but missing from disk is silently skipped. Ownership
-  duplicated across distributions is not globally deduplicated or reported as
-  a warning.
-- Values use a 1024-byte scale, but the current output labels them `KB` and
-  `MB`. This known mismatch is planned to change to `KiB` and `MiB` in Phase 2.
 - Results depend on the selected Python version and platform, and on extras and
   dependency resolution. Compare results only when those conditions match.
 - Multiple requested packages are installed into one environment. The current
-  resolver normally installs a shared dependency once, so it normally appears
-  once in the combined total. The output does not distinguish direct,
-  transitive, or shared dependencies, or attribute a shared dependency's size
-  to individual root packages.
-- The text output is not a reproducible analysis record. It does not preserve
-  the resolved versions, Python and platform details, `uv` version, index and
-  resolver settings, or whether the measurement was complete.
+  resolver normally installs a shared dependency once. The output does not
+  distinguish direct, transitive, or shared dependencies, or attribute a shared
+  dependency's size to individual root packages.
+- The text output is not a reproducible analysis record. There is no versioned
+  JSON output yet, and the report does not preserve the full measurement
+  context needed for comparisons.
 
 ### Installation safety
 

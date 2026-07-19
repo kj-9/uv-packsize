@@ -1,12 +1,29 @@
-import csv
+"""Click entry point for temporary-environment package-size analysis."""
+
+from __future__ import annotations
+
 import os
+import re
 import shutil
 import subprocess
 import tempfile
-from email.parser import BytesParser
 from pathlib import Path
 
 import click
+
+from uv_packsize.analysis import AnalysisContextError, analyze_installed_environment
+from uv_packsize.environment import (
+    EnvironmentDiscoveryError,
+    discover_installed_environment,
+)
+from uv_packsize.inventory import InventoryError
+from uv_packsize.models import BuildPolicy
+from uv_packsize.render import render_analysis_report
+
+_UV_VERSION = re.compile(
+    r"uv\s+([0-9]+(?:\.[0-9]+)+(?:[-+][A-Za-z0-9.-]+)?)"
+    r"(?:\s+\([A-Za-z0-9 ._+-]+\))?"
+)
 
 
 class UvCommandError(Exception):
@@ -18,6 +35,10 @@ class UvCommandError(Exception):
         self.stdout = stdout or ""
         self.stderr = stderr or ""
         super().__init__(f"uv command failed with exit code {exit_code}")
+
+
+class UvVersionError(ValueError):
+    """The ``uv --version`` response was not a safe version value."""
 
 
 def _run_uv(command):
@@ -59,7 +80,12 @@ def _create_venv(venv_dir, python=None):
 
 
 def _install_package(python_executable, package_names):
-    click.echo(f"Installing {', '.join(package_names)} and its dependencies...")
+    package_count = len(package_names)
+    package_label = "package" if package_count == 1 else "packages"
+    possessive = "its" if package_count == 1 else "their"
+    click.echo(
+        f"Installing {package_count} requested {package_label} and {possessive} dependencies..."
+    )
     install_command = [
         "uv",
         "pip",
@@ -72,159 +98,45 @@ def _install_package(python_executable, package_names):
     _run_uv(install_command)
 
 
+def _uv_version() -> str:
+    """Return a validated version from the installed ``uv`` executable."""
+
+    result = _run_uv(["uv", "--version"])
+    match = _UV_VERSION.fullmatch(result.stdout.strip())
+    if match is None:
+        raise UvVersionError("invalid uv version output")
+    return match.group(1)
+
+
 def _command_failure_message(error):
+    """Return a public summary without forwarding uv's untrusted diagnostics."""
+
     arguments = error.command[1:]
     if arguments[:1] == ("venv",):
         summary = "Could not create the virtual environment"
     elif arguments[:2] == ("pip", "install"):
         summary = "Could not install the requested packages"
+    elif arguments == ("--version",):
+        summary = "Could not determine the uv version"
     else:
         summary = "uv command failed"
 
-    output = error.stderr.strip() or error.stdout.strip()
-    detail_lines = [line.strip() for line in output.splitlines() if line.strip()]
-    detail = "\n".join(detail_lines[:3])
-    if len(detail_lines) > 3:
-        detail += "\n..."
-
-    message = f"{summary} (uv exit code {error.exit_code})."
-    if detail:
-        message += f"\n{detail}"
-    return message
+    return f"{summary} (uv exit code {error.exit_code})."
 
 
-def _find_site_packages(venv_dir):
-    for root, dirs, _files in os.walk(venv_dir):
-        if "site-packages" in dirs:
-            return Path(root, "site-packages")
+def _analysis_failure_message(error: Exception) -> str:
+    """Produce a stable CLI diagnostic without filesystem or probe details."""
 
-    raise click.ClickException(
-        "Could not find site-packages in the virtual environment."
-    )
-
-
-def _distribution_name(dist_info_dir):
-    metadata_path = dist_info_dir / "METADATA"
-    if metadata_path.is_file():
-        with metadata_path.open("rb") as metadata_file:
-            name = BytesParser().parse(metadata_file).get("Name")
-        if name:
-            return name
-
-    # A fallback for malformed installations without METADATA. The directory name
-    # is normally `{normalized_name}-{version}.dist-info`.
-    stem = dist_info_dir.name.removesuffix(".dist-info")
-    return stem.rsplit("-", 1)[0]
-
-
-def _record_files(dist_info_dir, site_packages_dir):
-    record_path = dist_info_dir / "RECORD"
-    if not record_path.is_file():
-        return [path for path in dist_info_dir.rglob("*") if path.is_file()]
-
-    files = []
-    with record_path.open(newline="", encoding="utf-8") as record_file:
-        for relative_path, *_rest in csv.reader(record_file):
-            path = (site_packages_dir / relative_path).resolve()
-            try:
-                path.relative_to(site_packages_dir.resolve())
-            except ValueError:
-                # Console scripts are recorded as paths outside site-packages and
-                # are reported separately by --bin.
-                continue
-            if path.is_file():
-                files.append(path)
-                if path.suffix == ".py":
-                    files.extend(path.parent.glob(f"__pycache__/{path.stem}.*.pyc"))
-    return files
-
-
-def _analyze_package_sizes(venv_dir):
-    site_packages_dir = _find_site_packages(venv_dir)
-
-    aggregated_sizes = {}
-    for dist_info_dir in site_packages_dir.glob("*.dist-info"):
-        package_name = _distribution_name(dist_info_dir)
-        # RECORD is the authoritative mapping between distributions and installed
-        # files. A set prevents malformed manifests from double-counting entries.
-        size = sum(
-            path.stat().st_size
-            for path in set(_record_files(dist_info_dir, site_packages_dir))
-        )
-        if size > 0:
-            aggregated_sizes[package_name] = (
-                aggregated_sizes.get(package_name, 0) + size
-            )
-    return aggregated_sizes
-
-
-def _analyze_binary_sizes(venv_dir):
-    binaries = []
-    bin_dir = os.path.join(venv_dir, "bin")
-
-    # Scripts to exclude from binary analysis
-    exclude_scripts = {
-        "activate",
-        "activate.csh",
-        "activate.fish",
-        "activate.nu",
-        "activate.ps1",
-        "activate.bat",
-        "activate_this.py",
-        "deactivate.bat",
-        "pydoc.bat",  # Often a boilerplate script
-    }
-
-    if os.path.exists(bin_dir):
-        bin_files = [
-            f
-            for f in os.listdir(bin_dir)
-            if os.path.isfile(os.path.join(bin_dir, f))
-            and not os.path.islink(os.path.join(bin_dir, f))
-            and f not in exclude_scripts
-        ]
-
-        for filename in bin_files:
-            filepath = os.path.join(bin_dir, filename)
-            file_size = os.path.getsize(filepath)
-            if file_size > 0:
-                binaries.append((filename, file_size))
-
-    return binaries
-
-
-def _format_size(size_in_bytes):
-    if size_in_bytes == 0:
-        return "0 B"
-    if size_in_bytes < 1024 * 1024:
-        return f"{size_in_bytes / 1024:.2f} KB"
-    return f"{size_in_bytes / (1024 * 1024):.2f} MB"
-
-
-def _print_table(  # noqa: PLR0913
-    title, data, footer_title, footer_value, name_width, size_width
-):
-    if not data:
-        click.echo(f"\n--- {title} ---")
-        click.echo("No items to display.")
-        return
-
-    # Header
-    click.echo(f"\n--- {title} ---")
-    header_title = "Package" if "Package" in title else "Binary"
-    header = f"{header_title.ljust(name_width)}  {'Size'.rjust(size_width)}"
-    click.echo(header)
-    click.echo(f"{'-' * name_width}  {'-' * size_width}")
-
-    # Body
-    for name, size in sorted(data, key=lambda item: item[1], reverse=True):
-        click.echo(f"{name.ljust(name_width)}  {_format_size(size).rjust(size_width)}")
-
-    # Footer
-    click.echo(f"{'-' * name_width}  {'-' * size_width}")
-    click.echo(
-        f"{footer_title.ljust(name_width)}  {_format_size(footer_value).rjust(size_width)}"
-    )
+    if isinstance(error, EnvironmentDiscoveryError):
+        return f"Could not inspect the temporary environment ({error.code.value})."
+    if isinstance(error, AnalysisContextError):
+        return f"Could not analyze the installed environment ({error.code.value})."
+    if isinstance(error, InventoryError):
+        code = getattr(error, "code", None)
+        if code is not None:
+            return f"Could not analyze installed files ({code.value})."
+        return "Could not analyze installed files."
+    raise TypeError("error must be an expected analysis failure")
 
 
 @click.command()
@@ -233,7 +145,7 @@ def _print_table(  # noqa: PLR0913
 @click.option(
     "--bin",
     is_flag=True,
-    help="Include the size of binaries in the .venv/bin directory.",
+    help="Display RECORD-owned scripts separately without changing the total.",
 )
 @click.option(
     "-p",
@@ -249,62 +161,45 @@ def cli(package_names, bin, python_version):
             "See https://github.com/astral-sh/uv for installation instructions."
         )
 
-    click.echo(f"Calculating size for {', '.join(package_names)}...")
+    package_count = len(package_names)
+    package_label = "package" if package_count == 1 else "packages"
+    click.echo(f"Calculating size for {package_count} requested {package_label}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         try:
             python_executable = _create_venv(venv_dir, python_version)
             _install_package(python_executable, package_names)
+            uv_version = _uv_version()
         except UvCommandError as error:
             raise click.ClickException(_command_failure_message(error)) from None
+        except UvVersionError:
+            raise click.ClickException("Could not determine the uv version.") from None
 
         click.echo("Analyzing sizes...")
-        package_sizes = _analyze_package_sizes(venv_dir)
-        package_items = list(package_sizes.items())
-        total_package_size = sum(package_sizes.values())
-
-        binaries = _analyze_binary_sizes(venv_dir) if bin else []
-        bin_items = binaries
-        total_bin_size = sum(size for name, size in bin_items)
-
-        # Determine column widths
-        all_items = package_items + bin_items
-        name_width = max((len(name) for name, size in all_items), default=0)
-        name_width = max(
-            name_width, len("Total Package Size"), len("Total Binaries Size")
-        )
-
-        all_sizes = [size for name, size in all_items] + [
-            total_package_size,
-            total_bin_size,
-        ]
-        size_width = max((len(_format_size(s)) for s in all_sizes), default=0)
-
-        _print_table(
-            "Package Sizes",
-            package_items,
-            "Total Package Size",
-            total_package_size,
-            name_width,
-            size_width,
-        )
-
-        total_size = total_package_size
-
-        if bin:
-            _print_table(
-                "Binaries in .venv/bin",
-                bin_items,
-                "Total Binaries Size",
-                total_bin_size,
-                name_width,
-                size_width,
+        try:
+            environment = discover_installed_environment(
+                venv_path=Path(venv_dir),
+                venv_python=Path(python_executable),
+                requirements=tuple(package_names),
+                uv_version=uv_version,
+                build_policy=BuildPolicy.ALLOW_BUILD,
+                compile_bytecode=False,
+                extras=(),
+                index_identifiers=(),
+                resolution_strategy="highest",
             )
-            total_size += total_bin_size
+            result = analyze_installed_environment(
+                context=environment.context,
+                layouts=environment.layouts,
+            )
+        except (
+            EnvironmentDiscoveryError,
+            AnalysisContextError,
+            InventoryError,
+        ) as error:
+            raise click.ClickException(_analysis_failure_message(error)) from None
 
-        click.echo(
-            f"\n{'Total size:'.ljust(name_width)}  {_format_size(total_size).rjust(size_width)}"
-        )
+        click.echo(render_analysis_report(result, show_scripts=bin))
 
     click.echo("\nCalculation complete.")
