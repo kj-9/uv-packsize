@@ -211,7 +211,7 @@ def test_file_entry_rejects_empty_identifiers(field):
         "category": FileCategory.PYTHON,
         "origin": FileOrigin.RECORD,
     }
-    values[field] = "  "
+    values[field] = ""
 
     with pytest.raises(ValueError, match=field):
         FileEntry(**values)
@@ -229,12 +229,17 @@ def test_file_entry_rejects_empty_identifiers(field):
         "a/../b",
         "a/",
         "a\0b",
-        " a/b",
     ],
 )
 def test_file_entry_rejects_noncanonical_lexical_identity(identity):
     with pytest.raises(ValueError, match="canonical_identity"):
         file_entry(identity, 1, path="valid/path")
+
+
+def test_file_entry_allows_whitespace_in_lexical_filename():
+    entry = file_entry("site-packages/ file ", 1, path="site-packages/ file ")
+
+    assert entry.path.endswith(" file ")
 
 
 @pytest.mark.parametrize(
@@ -370,15 +375,23 @@ def test_distribution_incompleteness_propagates_without_copying_warning():
     assert result.completeness is Completeness.INCOMPLETE
 
 
-def test_missing_record_warning_must_target_its_distribution():
-    warning = AnalysisWarning(
-        code=WarningCode.MISSING_RECORD,
-        target_kind=WarningTargetKind.DISTRIBUTION,
-        target_identity="other==1",
-    )
-
-    with pytest.raises(ValueError, match="must match its distribution"):
-        DistributionResult(name="example", version="1", files=(), warnings=(warning,))
+def test_distribution_warning_must_target_its_distribution():
+    for code in (
+        WarningCode.MISSING_RECORD,
+        WarningCode.INVALID_RECORD,
+        WarningCode.INVALID_RECORD_PATH,
+        WarningCode.FILESYSTEM_LAYOUT_ERROR,
+        WarningCode.RECORD_PATH_OUTSIDE_PREFIX,
+    ):
+        warning = AnalysisWarning(
+            code=code,
+            target_kind=WarningTargetKind.DISTRIBUTION,
+            target_identity="other==1",
+        )
+        with pytest.raises(ValueError, match="must match its distribution"):
+            DistributionResult(
+                name="example", version="1", files=(), warnings=(warning,)
+            )
 
 
 def test_warning_rejects_free_form_code_and_empty_target():

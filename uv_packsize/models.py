@@ -52,7 +52,10 @@ def _normalized_name(value: str) -> str:
 
 
 def _validate_lexical_path(value: str, field_name: str) -> None:
-    _require_non_empty(value, field_name)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if "\0" in value:
+        raise ValueError(f"{field_name} must not contain NUL")
     if "\\" in value:
         raise ValueError(f"{field_name} must use '/' separators")
     if value.startswith("/") or _WINDOWS_DRIVE_PATH.match(value):
@@ -113,12 +116,27 @@ class WarningCode(str, Enum):
 
     DUPLICATE_OWNERSHIP = "duplicate-ownership"
     DUPLICATE_RECORD_ENTRY = "duplicate-record-entry"
+    FILESYSTEM_ERROR = "filesystem-error"
+    FILESYSTEM_LAYOUT_ERROR = "filesystem-layout-error"
+    INVALID_RECORD = "invalid-record"
+    INVALID_RECORD_PATH = "invalid-record-path"
     MISSING_FILE = "missing-file"
     MISSING_RECORD = "missing-record"
+    RECORD_PATH_OUTSIDE_PREFIX = "record-path-outside-prefix"
+    UNSUPPORTED_FILE_TYPE = "unsupported-file-type"
 
     @property
     def causes_incomplete_result(self) -> bool:
-        return self in {self.MISSING_FILE, self.MISSING_RECORD}
+        return self in {
+            self.INVALID_RECORD,
+            self.INVALID_RECORD_PATH,
+            self.FILESYSTEM_ERROR,
+            self.FILESYSTEM_LAYOUT_ERROR,
+            self.MISSING_FILE,
+            self.MISSING_RECORD,
+            self.RECORD_PATH_OUTSIDE_PREFIX,
+            self.UNSUPPORTED_FILE_TYPE,
+        }
 
 
 class WarningTargetKind(str, Enum):
@@ -151,8 +169,14 @@ class AnalysisWarning:
         expected_kind = {
             WarningCode.DUPLICATE_OWNERSHIP: WarningTargetKind.FILE,
             WarningCode.DUPLICATE_RECORD_ENTRY: WarningTargetKind.FILE,
+            WarningCode.FILESYSTEM_ERROR: WarningTargetKind.FILE,
+            WarningCode.FILESYSTEM_LAYOUT_ERROR: WarningTargetKind.DISTRIBUTION,
+            WarningCode.INVALID_RECORD: WarningTargetKind.DISTRIBUTION,
+            WarningCode.INVALID_RECORD_PATH: WarningTargetKind.DISTRIBUTION,
             WarningCode.MISSING_FILE: WarningTargetKind.FILE,
             WarningCode.MISSING_RECORD: WarningTargetKind.DISTRIBUTION,
+            WarningCode.RECORD_PATH_OUTSIDE_PREFIX: WarningTargetKind.DISTRIBUTION,
+            WarningCode.UNSUPPORTED_FILE_TYPE: WarningTargetKind.FILE,
         }[self.code]
         if self.target_kind is not expected_kind:
             raise ValueError(
@@ -304,7 +328,10 @@ class FileEntry:
         if not isinstance(self.origin, FileOrigin):
             raise TypeError("origin must be a FileOrigin")
         if self.symlink_target is not None:
-            _require_non_empty(self.symlink_target, "symlink_target")
+            if not isinstance(self.symlink_target, str) or not self.symlink_target:
+                raise ValueError("symlink_target must be a non-empty string")
+            if "\0" in self.symlink_target:
+                raise ValueError("symlink_target must not contain NUL")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -342,13 +369,11 @@ class DistributionResult:
             )
         distribution_identity = f"{self.name}=={self.version}"
         if any(
-            warning.code is WarningCode.MISSING_RECORD
+            warning.target_kind is WarningTargetKind.DISTRIBUTION
             and warning.target_identity != distribution_identity
             for warning in self.warnings
         ):
-            raise ValueError(
-                "missing RECORD warning target must match its distribution"
-            )
+            raise ValueError("distribution warning target must match its distribution")
 
     @property
     def total_logical_bytes(self) -> int:
