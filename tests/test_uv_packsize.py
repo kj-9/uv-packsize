@@ -4,9 +4,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
-from uv_packsize.cli import _analyze_package_sizes, cli
+from uv_packsize.cli import (
+    UvCommandError,
+    _analyze_package_sizes,
+    _create_venv,
+    _install_package,
+    _run_uv,
+    cli,
+)
 
 EXPECTED_VERSION = "0.1.2"
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -151,8 +159,117 @@ def test_uv_not_found(monkeypatch):
     monkeypatch.setenv("PATH", "")
     runner = CliRunner()
     result = runner.invoke(cli, ["iniconfig==2.0.0"])
+    assert result.exit_code == 1
+    assert "'uv' command not found" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_uv_preserves_failure_details(monkeypatch):
+    command = ["uv", "example", "--flag"]
+
+    def fail(_command, **kwargs):
+        assert _command == command
+        assert kwargs == {
+            "check": False,
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+        }
+        return subprocess.CompletedProcess(
+            _command,
+            23,
+            stdout="captured stdout",
+            stderr="captured stderr",
+        )
+
+    monkeypatch.setattr("uv_packsize.cli.subprocess.run", fail)
+
+    with pytest.raises(UvCommandError) as raised:
+        _run_uv(command)
+
+    assert raised.value.command == tuple(command)
+    assert raised.value.exit_code == 23
+    assert raised.value.stdout == "captured stdout"
+    assert raised.value.stderr == "captured stderr"
+
+    empty_output = UvCommandError(command, 1, None, None)
+    assert empty_output.stdout == ""
+    assert empty_output.stderr == ""
+
+
+def test_create_venv_propagates_uv_failure(monkeypatch, tmp_path):
+    failure = UvCommandError(["uv", "venv"], 2, "stdout", "stderr")
+    venv_dir = tmp_path / "venv"
+
+    def fail(command):
+        assert command == ["uv", "venv", "--python", "0.0", venv_dir]
+        raise failure
+
+    monkeypatch.setattr("uv_packsize.cli._run_uv", fail)
+
+    with pytest.raises(UvCommandError) as raised:
+        _create_venv(venv_dir, "0.0")
+
+    assert raised.value is failure
+
+
+def test_install_package_propagates_uv_failure(monkeypatch):
+    failure = UvCommandError(["uv", "pip", "install"], 1, "stdout", "stderr")
+
+    def fail(command):
+        assert command == [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            "/venv/bin/python",
+            "example==1.0",
+        ]
+        raise failure
+
+    monkeypatch.setattr("uv_packsize.cli._run_uv", fail)
+
+    with pytest.raises(UvCommandError) as raised:
+        _install_package("/venv/bin/python", ["example==1.0"])
+
+    assert raised.value is failure
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_summary"),
+    [
+        ("venv", "Could not create the virtual environment"),
+        ("install", "Could not install the requested packages"),
+    ],
+)
+def test_cli_formats_uv_failures_without_traceback(
+    monkeypatch, failed_stage, expected_summary
+):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+
+    def run(command):
+        stage = "venv" if command[1] == "venv" else "install"
+        if stage == failed_stage:
+            raise UvCommandError(
+                [*command, "secret-command-value"],
+                2,
+                "less useful stdout",
+                "specific uv diagnostic\nadditional context",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("uv_packsize.cli._run_uv", run)
+
+    result = CliRunner().invoke(cli, ["example-package", "--python", "0.0"])
+
     assert result.exit_code != 0
-    assert "'uv' command not found" in result.output
+    assert result.exit_code == 1
+    assert expected_summary in result.stderr
+    assert "uv exit code 2" in result.stderr
+    assert "specific uv diagnostic" in result.stderr
+    assert "secret-command-value" not in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_python_version_option(monkeypatch):

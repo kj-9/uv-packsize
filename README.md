@@ -54,6 +54,9 @@ You can also use:
 python -m uv_packsize --help
 ```
 
+If virtual environment creation or package installation fails, the command exits
+with status 1 and shows a concise `uv` diagnostic without a Python traceback.
+
 ### Example
 
 ```bash

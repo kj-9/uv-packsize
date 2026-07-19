@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 1: リリース品質の回復 |
 | `in_progress` | なし |
-| 次のタスク | P1-05: subprocessエラー処理の統一 |
-| Phase 1進捗 | 4 / 9 完了 |
+| 次のタスク | P1-06: 測定契約と安全性のREADME記載 |
+| Phase 1進捗 | 5 / 9 完了 |
 | Blocker | なし |
-| 次の成果物 | tracebackを表示しないsubprocessエラー処理 |
+| 次の成果物 | 含有範囲、単位、platform依存、sdistリスクの公開契約 |
 
 ## ステータス定義
 
@@ -92,7 +92,7 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 | P1-02 | リリース対象メタデータを更新する | `done` | P1-01 | versionが`0.1.2`、Python方針が明示され、metadata testがある |
 | P1-03 | lockとローカル実行を厳格化する | `done` | P1-02 | `uv.lock`が同期し、通常チェックが`--locked`を使う |
 | P1-04 | CIのlock検証とPython matrixを更新する | `done` | P1-03 | stale lockで失敗し、Python 3.10〜3.14を検証する |
-| P1-05 | subprocessエラー処理を統一する | `todo` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
+| P1-05 | subprocessエラー処理を統一する | `done` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
 | P1-06 | 測定契約と安全性をREADMEへ記載する | `todo` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
 | P1-07 | Phase 1変更のテストを補強する | `todo` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
 | P1-08 | distribution artifactを検証する | `todo` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
@@ -135,6 +135,18 @@ Phase 0で定義した測定契約は現時点では設計案である。CLIの�
 - 独立したlock jobで`uv lock --check`を実行し、stale lockを明示的に拒否する。
 - CIのmatrixとlock checkを検証する回帰テストを追加する。
 
+### P1-05 実施内容
+
+完了したタスク。
+
+変更:
+
+- subprocess呼び出しを単一のuv adapterへ集約する。
+- command、exit code、stdout、stderrを保持する専用例外を導入する。
+- virtual environment作成とpackage installの失敗をCLI境界で利用者向けClick errorへ変換する。
+- uv未検出を含む失敗でPython tracebackを表示せず、簡潔な診断をstderrへ出す。
+- subprocess失敗時の公開CLI契約をREADMEへ記載する。
+
 ## Phase 2以降の入口タスク
 
 Phase 1完了時に詳細分解する。現時点の入口は以下とする。
@@ -148,6 +160,49 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ## 作業記録
+
+### 2026-07-19: P1-05 subprocessエラー処理の統一
+
+状態: `done`
+
+変更:
+
+- `_run_uv`を導入し、`_create_venv`と`_install_package`のsubprocess呼び出しを集約した。
+- `UvCommandError`を導入し、実行command、uv exit code、stdout、stderrを保持するようにした。
+- subprocessのtext decodeをUTF-8、decode不能byteのreplacementへ固定し、stdout/stderrの欠損値を空文字へ正規化した。
+- CLI境界でvenv作成失敗とinstall失敗を区別し、uv exit codeとstderr先頭3行までを含む`ClickException`へ変換した。command自体はcredential漏洩を避けるため利用者向けmessageへ含めない。
+- subprocess失敗とuv未検出のCLI exit statusを1へ統一し、Python tracebackを表示しないようにした。
+- adapterの情報保持、venv/installでの専用例外伝播、CLIのinvalid Python相当・resolver相当・uv未検出をネットワーク不要のunit testsで検証した。
+- READMEへsubprocess失敗時のexit statusと診断表示を追記した。
+
+利用者向けmessage:
+
+- venv作成失敗: `Could not create the virtual environment (uv exit code N).`
+- install失敗: `Could not install the requested packages (uv exit code N).`
+- 続けて、credentialを含み得るcommandは表示せず、uvのstderrを最大3行表示する。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_uv_packsize.py -q -k 'run_uv or propagates_uv_failure or formats_uv_failures or uv_not_found'
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- P1-05の対象テスト6件は成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全19テストが成功した。
+- `uv lock --check`は成功した。
+- whitespace errorはなかった。
+
+後続作業:
+
+- 通常テストに残るPyPI依存の全面的なlocal fixture移行はF-004としてPhase 2で行う。
+- `--verbose`やerror taxonomyは今回追加せず、必要性を後続Phaseで検討する。
 
 ### 2026-07-19: P1-04 CIのlock検証とPython matrixの更新
 

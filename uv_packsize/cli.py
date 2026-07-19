@@ -2,12 +2,45 @@ import csv
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from email.parser import BytesParser
 from pathlib import Path
 
 import click
+
+
+class UvCommandError(Exception):
+    """A failed uv command with its diagnostic output preserved."""
+
+    def __init__(self, command, exit_code, stdout, stderr):
+        self.command = tuple(command)
+        self.exit_code = exit_code
+        self.stdout = stdout or ""
+        self.stderr = stderr or ""
+        super().__init__(f"uv command failed with exit code {exit_code}")
+
+
+def _run_uv(command):
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as error:
+        raise UvCommandError(command, 127, "", str(error)) from error
+
+    if result.returncode != 0:
+        raise UvCommandError(
+            command,
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
+    return result
 
 
 def _create_venv(venv_dir, python=None):
@@ -17,7 +50,7 @@ def _create_venv(venv_dir, python=None):
     if python:
         command.extend(["--python", python])
     command.append(venv_dir)
-    subprocess.run(command, check=True, capture_output=True)
+    _run_uv(command)
 
     python_executable = os.path.join(venv_dir, "bin", "python")
     if not os.path.exists(python_executable):  # For Windows
@@ -36,16 +69,28 @@ def _install_package(python_executable, package_names):
     ]
     install_command.extend(package_names)
 
-    result = subprocess.run(
-        install_command,
-        check=False,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        click.echo(f"Error installing packages: {', '.join(package_names)}", err=True)
-        click.echo(f"uv pip install stdout: {result.stdout.decode().strip()}", err=True)
-        click.echo(f"uv pip install stderr: {result.stderr.decode().strip()}", err=True)
-        sys.exit(result.returncode)
+    _run_uv(install_command)
+
+
+def _command_failure_message(error):
+    arguments = error.command[1:]
+    if arguments[:1] == ("venv",):
+        summary = "Could not create the virtual environment"
+    elif arguments[:2] == ("pip", "install"):
+        summary = "Could not install the requested packages"
+    else:
+        summary = "uv command failed"
+
+    output = error.stderr.strip() or error.stdout.strip()
+    detail_lines = [line.strip() for line in output.splitlines() if line.strip()]
+    detail = "\n".join(detail_lines[:3])
+    if len(detail_lines) > 3:
+        detail += "\n..."
+
+    message = f"{summary} (uv exit code {error.exit_code})."
+    if detail:
+        message += f"\n{detail}"
+    return message
 
 
 def _find_site_packages(venv_dir):
@@ -199,19 +244,20 @@ def _print_table(  # noqa: PLR0913
 def cli(package_names, bin, python_version):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
-        click.echo(
-            "Error: 'uv' command not found. Please install it first. "
-            "See https://github.com/astral-sh/uv for installation instructions.",
-            err=True,
+        raise click.ClickException(
+            "'uv' command not found. Please install it first. "
+            "See https://github.com/astral-sh/uv for installation instructions."
         )
-        sys.exit(1)
 
     click.echo(f"Calculating size for {', '.join(package_names)}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
-        python_executable = _create_venv(venv_dir, python_version)
-        _install_package(python_executable, package_names)
+        try:
+            python_executable = _create_venv(venv_dir, python_version)
+            _install_package(python_executable, package_names)
+        except UvCommandError as error:
+            raise click.ClickException(_command_failure_message(error)) from None
 
         click.echo("Analyzing sizes...")
         package_sizes = _analyze_package_sizes(venv_dir)
