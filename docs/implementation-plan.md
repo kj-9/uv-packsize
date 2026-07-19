@@ -8,12 +8,12 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 1: リリース品質の回復 |
+| 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P1-09: Phase 1総合検証と引き継ぎ |
-| Phase 1進捗 | 8 / 9 完了 |
+| 次のタスク | P2-01: AnalysisResultとfile inventoryのデータモデル設計 |
+| Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Blocker | なし |
-| 次の成果物 | Phase 1総合検証結果とPhase 2への引き継ぎ |
+| 次の成果物 | 内部result modelと集計不変条件のnetwork不要unit tests |
 
 ## ステータス定義
 
@@ -64,8 +64,8 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase | 目的 | 状態 |
 |---|---|---|
 | Phase 0 | 測定契約とプロダクト方針の整理 | `done` |
-| Phase 1 | リリース品質の回復 | `in_progress` |
-| Phase 2 | 信頼できる測定エンジン | `todo` |
+| Phase 1 | リリース品質の回復 | `done` |
+| Phase 2 | 信頼できる測定エンジン | `in_progress` |
 | Phase 3 | サイズの理由を説明する | `todo` |
 | Phase 4 | CIでの継続管理 | `todo` |
 | Phase 5 | project/lockと比較分析 | `todo` |
@@ -96,7 +96,7 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 | P1-06 | 測定契約と安全性をREADMEへ記載する | `done` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
 | P1-07 | Phase 1変更のテストを補強する | `done` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
 | P1-08 | distribution artifactを検証する | `done` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
-| P1-09 | Phase 1総合検証と引き継ぎを行う | `todo` | P1-08 | 全検証が成功し、Phase 2の最初のタスクが具体化されている |
+| P1-09 | Phase 1総合検証と引き継ぎを行う | `done` | P1-08 | 全検証が成功し、Phase 2の最初のタスクが具体化されている |
 
 ### P1-02 実施内容
 
@@ -184,6 +184,16 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 - built wheelをworkspace外の一時directoryからisolated実行し、console entry pointのversionを検証する。
 - publish workflowのPython matrix、uv pinをCIと揃え、artifact検証後だけpublish stepへ進む構成にする。
 
+### P1-09 実施内容
+
+完了したタスク。
+
+変更:
+
+- P1-01〜P1-08の完了条件と成果物を総合監査する。
+- lock、CI checks、全テスト、artifact、CLI version、実error pathを再検証する。
+- Phase 1の既知制約をPhase 2へ引き継ぎ、P2-01を実行可能な単位へ具体化する。
+
 ## Phase 2以降の入口タスク
 
 Phase 1完了時に詳細分解する。現時点の入口は以下とする。
@@ -196,7 +206,99 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
+### P2-01: AnalysisResultとfile inventoryのデータモデル設計
+
+目的:
+
+- installer、inventory収集、集計、rendererを分離するため、測定結果の内部表現と集計不変条件をコードとunit testsで確立する。
+
+責務:
+
+- `ResolutionContext`: 入力requirements、Python、platform、extras、resolver/build条件など、結果比較に必要な解決contextを保持する。subprocess実行は担当しない。
+- `FileEntry`: 測定prefixを基準とする表示用path、global dedupe用`canonical_identity`、logical bytes、file category、`RECORD`由来かどうか、warningに必要な属性を保持する。sizeは非負とし、所有distribution fieldは持たない。
+- `DistributionResult`: distributionの正規化nameとresolved version、所有する`FileEntry`、distribution単位のtyped warning/completenessを保持する。FileEntry ownershipの唯一のsource of truthはこのcontainer関係とし、distribution totalはfile inventoryから導出して独立した可変値として二重管理しない。
+- `AnalysisResult`: `ResolutionContext`、全distribution、globalのtyped warning/completenessを保持する。global totalは含有対象の一意なfile inventoryから導出する。
+- warningはfree textではなく、`WarningCode`等のenum/codeと対象identityを持つstructured valueで表す。completenessもboolではなく`complete`/`incomplete`等のenumとし、warning collectionは重複を除いたdeterministicなtuple/orderで保持する。
+
+不変条件:
+
+- 各distribution totalは、そのdistributionに含まれる`FileEntry.logical_bytes`の合計と一致する。
+- `FileEntry.canonical_identity`は非空のimmutable stringとする。値は実際に数えるfileについてcollectorが生成する、測定prefix相対・separator統一・`.`/`..`除去・対象platformのcase rule適用後のidentityとし、symlinkの場合は解決先を識別できる情報を反映する。同じidentityはglobal totalで同じfileとして扱う。
+- global totalは`canonical_identity`で一意化した含有inventoryから導出し、複数root packageや重複所有で黙って二重計上しない。
+- distribution totalsの合計とglobal totalが異なり得る場合は、shared/duplicate ownershipとしてモデル上説明でき、warningまたは明示的な関係を保持する。
+- missing `RECORD`、存在しないfile、重複所有などの不完全性を正常値へ潰さず、completenessとwarningで表現できる。
+- interpreter、venv基礎file、uv cacheは暗黙にinventoryへ追加しない。
+
+スコープ境界:
+
+- P2-01ではmodel moduleとnetwork不要unit testsを追加する。既存CLIの集計処理への接続、実filesystem inventory収集、prefix外path対応は行わない。
+- prefix-relative path化、platformごとのcase/path normalization、symlink解決と`canonical_identity`生成はinventory collectorの責務とする。P2-01のmodelはcollectorから供給されたidentityを検証・比較するだけで、filesystemへ問い合わせない。
+- JSON schema、JSON/text renderer、公開CLI optionはP2-01では実装しない。model fieldは将来deterministic serializationできる値に限定し、renderer接続は後続taskとして分解する。
+- wheel-only installer、local wheel integration fixture、`KiB`/`MiB`表示変更も後続taskとする。
+
+完了条件:
+
+- 4つのmodelの責務とfieldが型として実装され、可変な集計値を重複保持しない。
+- distribution total、global total、shared/duplicate ownership、不完全resultの関係をunit testsで説明できる。
+- 異なるdistributionに同じ`canonical_identity`を持つFileEntryを置くpure fixtureで、distribution totalsには各ownership分が現れ、global totalでは一度だけ数えることを検証する。
+- negative sizeや不正なidentityなど、モデル単体で防げるinvalid stateを拒否する。
+- warning code、対象identity、completenessがtyped valueで表現され、warning tupleのdedupeとorderが入力順に依存せずdeterministicであることをunit testsで検証する。
+- testsは一時的なPython objectだけで構築し、uv、resolver、network、実package installを必要としない。
+- 既存CLIの出力と公開契約を変更せず、`make ci-check`、`make test`、`uv lock --check`が成功する。
+
+Phase 1からの引き継ぎ:
+
+- release metadataはversion `0.1.2`、Python 3.10〜3.14、uv `0.11.3`で固定・検証されている。
+- subprocess errorはClick errorへ正規化され、READMEは現行測定契約とsdist実行リスクを明記している。
+- wheel/sdist metadata、archive安全性、installed entry pointは`make verify-build`とpublish gateで検証される。
+- F-001〜F-003はinventoryと表示、F-004はlocal fixture、F-005はwheel-only installerの後続設計へ引き継ぐ。
+- GitHub Actions上のworkflow実走、release、tag、PyPI publishは未実施である。
+
 ## 作業記録
+
+### 2026-07-19: P1-09 Phase 1総合検証と引き継ぎ
+
+状態: `done`
+
+総合監査:
+
+- P1-01〜P1-08はすべて`done`で、各完了条件と検証記録を確認した。
+- project/lock/artifact versionは`0.1.2`、requires-pythonは`>=3.10`で一致する。
+- CIとpublish test matrixはPython 3.10〜3.14、uvは`0.11.3`で固定され、CIは独立lock check、publishはartifact gateを持つ。
+- subprocess失敗はCLI境界でexit 1のClick errorとなり、READMEは測定範囲、既知制約、sdist buildの安全性を記載する。
+- regression tests、artifact verifier、publish workflow contractがPhase 1変更を継続検証する。
+- working treeは総合監査開始時点でP1-09の進捗文書変更だけを含み、`main`は`origin/main`より7コミット先行していた。
+- 直近コミットは`build: verify release artifacts before publish`、`test: strengthen phase one regression coverage`、`docs: define measurement and installation safety`、`fix: normalize uv subprocess failures`、`chore: restore release metadata and lock checks`だった。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+make verify-build
+uv run --locked uv-packsize --version
+uv run --locked uv-packsize six --python 0.0
+git diff --check
+git status --short --branch
+git log -5 --oneline --decorate
+```
+
+結果:
+
+- `uv lock --check`は成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全25テストが成功した。
+- wheelとsdistを再buildし、metadata、archive構造、installed entry pointを検証した。
+- CLI versionはexact `uv-packsize, version 0.1.2`だった。
+- 無効な`--python 0.0`はexit 1で、`Invalid version request`を含む簡潔なuv診断を表示し、Python tracebackはなかった。
+- whitespace errorはなかった。
+
+Phase 1判定:
+
+- Phase 1は9 / 9タスクの完了条件を満たしたため`done`とする。
+- GitHub Actions上のCI/publish workflow実走、release、tag、PyPI publishは未検証・未実施として残す。
+- 次のタスクはP2-01とし、Phase 2全体の詳細分解はP2-01のmodel判断後に行う。
 
 ### 2026-07-19: P1-08 distribution artifactの検証
 
@@ -542,6 +644,6 @@ git diff --check
 | F-001 | `RECORD`のsite-packages外パスを除外しており、scripts/data/headersを完全には測定できない | Phase 2 | `todo` |
 | F-002 | `--bin`がWindowsの`Scripts`を分析しない | Phase 2 | `todo` |
 | F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
-| F-004 | 通常テストがPyPIとresolverの文言に依存している | Phase 2 | `todo` |
-| F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 1/2 | `todo` |
+| F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | Phase 2 | `todo` |
+| F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 2 | `todo` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
