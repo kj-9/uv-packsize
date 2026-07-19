@@ -120,8 +120,11 @@ class WarningCode(str, Enum):
     FILESYSTEM_LAYOUT_ERROR = "filesystem-layout-error"
     INVALID_RECORD = "invalid-record"
     INVALID_RECORD_PATH = "invalid-record-path"
+    INVALID_METADATA = "invalid-metadata"
     MISSING_FILE = "missing-file"
+    MISSING_METADATA = "missing-metadata"
     MISSING_RECORD = "missing-record"
+    MISSING_RECORD_SELF_ENTRY = "missing-record-self-entry"
     RECORD_PATH_OUTSIDE_PREFIX = "record-path-outside-prefix"
     UNSUPPORTED_FILE_TYPE = "unsupported-file-type"
 
@@ -130,10 +133,13 @@ class WarningCode(str, Enum):
         return self in {
             self.INVALID_RECORD,
             self.INVALID_RECORD_PATH,
+            self.INVALID_METADATA,
             self.FILESYSTEM_ERROR,
             self.FILESYSTEM_LAYOUT_ERROR,
             self.MISSING_FILE,
+            self.MISSING_METADATA,
             self.MISSING_RECORD,
+            self.MISSING_RECORD_SELF_ENTRY,
             self.RECORD_PATH_OUTSIDE_PREFIX,
             self.UNSUPPORTED_FILE_TYPE,
         }
@@ -173,8 +179,11 @@ class AnalysisWarning:
             WarningCode.FILESYSTEM_LAYOUT_ERROR: WarningTargetKind.DISTRIBUTION,
             WarningCode.INVALID_RECORD: WarningTargetKind.DISTRIBUTION,
             WarningCode.INVALID_RECORD_PATH: WarningTargetKind.DISTRIBUTION,
+            WarningCode.INVALID_METADATA: WarningTargetKind.DISTRIBUTION,
             WarningCode.MISSING_FILE: WarningTargetKind.FILE,
+            WarningCode.MISSING_METADATA: WarningTargetKind.DISTRIBUTION,
             WarningCode.MISSING_RECORD: WarningTargetKind.DISTRIBUTION,
+            WarningCode.MISSING_RECORD_SELF_ENTRY: WarningTargetKind.DISTRIBUTION,
             WarningCode.RECORD_PATH_OUTSIDE_PREFIX: WarningTargetKind.DISTRIBUTION,
             WarningCode.UNSUPPORTED_FILE_TYPE: WarningTargetKind.FILE,
         }[self.code]

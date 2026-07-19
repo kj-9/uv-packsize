@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-02b: 全distribution scanと明示的なsupplemental discovery |
+| 次のタスク | P2-03: installed environmentの測定contextとinventoryを`AnalysisResult`へ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 2タスク完了（P2-01、P2-02a `done`、P2-02bが次） |
+| Phase 2進捗 | 3タスク完了（P2-01、P2-02a、P2-02b `done`） |
 | Blocker | なし |
-| 次の成果物 | 全installed distributionの決定的scanと明示的な`DISCOVERED` file収集 |
+| 次の成果物 | resolver/install contextとinventoryから構築する完全な`AnalysisResult` |
 
 ## ステータス定義
 
@@ -203,7 +203,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 |---|---|---|---|
 | P2-01 | Phase 2 | `AnalysisResult`とfile inventoryのデータモデルを設計する | `done` |
 | P2-02a | Phase 2 | RECORD path resolverとsingle-distribution collectorを実装する | `done` |
-| P2-02b | Phase 2 | 全distribution scanと明示的なsupplemental discoveryを実装する | `todo` |
+| P2-02b | Phase 2 | 全distribution scanと明示的なsupplemental discoveryを実装する | `done` |
+| P2-03 | Phase 2 | installed environmentの測定contextとinventoryを`AnalysisResult`へ接続する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -296,14 +297,61 @@ P2-02aで固定した契約:
 - invalid RECORD/path、prefix外path、missing file、duplicate entry、unsupported file type、filesystem/layout errorをtyped warningとして保持する。distribution-target warningは同一codeごとにdedupeされるため、現段階では複数のinvalid/outside raw path詳細を保持しない。
 - `RECORD` entryを最優先し、未記載の対応bytecodeだけ`GENERATED`、RECORD欠落時のdist-info subtreeだけ`FALLBACK`とする。real directoryはfallback ownershipに含めず、その配下fileを収集する。
 
-P2-02bへ送る事項:
+P2-02bで固定した契約:
 
-- 複数site-packagesを含む全distributionのdeterministic scanと、明示的なsupplemental ownership指定による`DISCOVERED` originを実装する。
-- mandatory `METADATA`がmissing/unreadableな場合にdist-info dirnameへfallbackしている現状を、typed incomplete warningへするかを決定する。
-- 空RECORDやRECORD自身のentry欠落を現状はmetadata内容として信頼している。collectorがcompletenessを検査する範囲を決定しfixture化する。
-- invalid/outside RECORD warningへraw path詳細を安全に保持する必要性と、credentialやhost pathを結果へ漏らさない表現を検討する。
+- compatibleな複数site-packagesのdirect-child `.dist-info`を、layout入力順とfilesystem列挙順に依存せず走査する。resolved physical siteのalias、logical siteの重複、incompatibleなprefix/flavor/case rule、正規化後のdistribution name/version衝突はtyped scan errorとして拒否する。
+- supplemental ownershipは正規化したdistribution nameとexact versionをowner keyとし、測定prefix相対の明示的なexact file pathだけを`DISCOVERED`へ追加する。directoryの再帰scanや暗黙の隣接file追加は行わない。同一指定とcase aliasはset semanticsで一意化し、入力順に依存しない。
+- ownership優先順位は`RECORD` > `GENERATED` > `FALLBACK` > `DISCOVERED`とし、RECORDが主張したmissing/unsupported/filesystem-error pathもsupplementalで再解釈しない。異なるownerによる同じcanonical identityはfile signatureが一致する場合だけ許可する。
+- supplementalのinvalid raw pathは結果やerror targetへ転記せず、解決後のmissing/special/filesystem errorだけcanonical identityで報告する。final symlinkはprefix外targetでもfollowせずlink自身を収集し、intermediate symlink escapeは拒否する。
+- valid METADATAをdistribution identityの第一情報源とする。missing/invalid METADATAでdirname fallbackできる場合はtyped incomplete warningを保持し、fallback不能ならinvalid dist-infoとして拒否する。空RECORDはinvalid、RECORD self-entry欠落はtyped incomplete warningとする。
+
+P2-03へ送る事項:
+
+- installer/resolverが確定したrequirements、Python、platform、architecture、uv version、build policy、bytecode条件から`ResolutionContext`を構築し、`collect_distributions`の結果と合わせて`AnalysisResult`を返すorchestration boundaryを追加する。
+- P2-03では既存text renderer/CLIの置換を混ぜず、network不要のinstalled-environment fixtureでcontextとinventoryの接続、global dedupe、warning/completeness伝播を検証する。
 
 ## 作業記録
+
+### 2026-07-19: P2-02b 全distribution scanと明示的なsupplemental discovery
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/inventory.py`](../uv_packsize/inventory.py)へ、compatibleな複数`InventoryLayout`を検証し、全direct-child `.dist-info`を決定的に収集する`collect_distributions`を追加した。layout alias/incompatibility、filesystem failure、invalid dist-info、distribution name/version衝突をtyped errorで報告する。
+- distribution name/versionをowner keyとするimmutableな`SupplementalOwnership`を追加し、callerが明示した測定prefix相対のexact fileだけを`DISCOVERED`として既存collectorへ統合した。同一raw pathとcase aliasはset semanticsで一意化し、origin優先順位を保つ。
+- cross-ownerの同一canonical identityはlogical bytes、category、symlink targetが一致する場合だけ許可し、不一致は`InventoryConflictError`として`AnalysisResult`構築前に拒否する。
+- METADATAを優先してdistribution identityを読み、missing/invalid時のdirname fallbackをtyped incomplete warningにした。空RECORDとRECORD self-entry欠落もそれぞれtyped incomplete warningとして扱い、P2-02aからのmetadata/RECORD完全性課題を完了した。
+- invalid supplemental raw pathをerror targetへ含めず、final symlinkはtargetをfollowせずlink entryを収集し、intermediate symlink escape、missing file、directory/special file、filesystem errorをtyped supplemental errorにした。
+
+テスト:
+
+- 複数POSIX/Windows layout、logical case variant、resolved physical symlink alias、filesystem列挙順とlayout入力順、uppercase `.DIST-INFO`、direct-child限定、distribution衝突をnetwork不要fixtureで検証した。
+- exact supplemental file、同一raw path/case alias/複数ownershipの順序不変、RECORD/GENERATED/FALLBACK/missing claimの優先、unknown/stale owner、invalid/missing/special/escape、prefix外targetのfinal symlink、compatible/incompatible shared ownershipを検証した。
+- valid/missing/invalid METADATA、fallback不能なdirname、空RECORD、self-entry欠落を検証し、収集結果を`AnalysisResult`へ追加補正なしで渡してglobal dedupeできることを確認した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_inventory.py tests/test_models.py -q
+uv run --locked ruff check uv_packsize/inventory.py uv_packsize/models.py tests/test_inventory.py tests/test_models.py
+uv run --locked ty check
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- inventory/model対象156テスト、全181テストが成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- lockは同期済みで、whitespace errorはなかった。
+
+スコープ境界:
+
+- collectorは既存CLI/renderer/installerへ未接続で、公開出力と現行測定挙動は変更していない。
+- invalid/outside RECORDの複数raw path詳細はcredentialやhost pathを漏らさないため保持せず、distribution-targetのtyped warningとして集約する現行契約を維持した。
 
 ### 2026-07-19: P2-02a RECORD path resolverとsingle-distribution collector
 

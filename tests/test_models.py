@@ -377,10 +377,13 @@ def test_distribution_incompleteness_propagates_without_copying_warning():
 
 def test_distribution_warning_must_target_its_distribution():
     for code in (
+        WarningCode.INVALID_METADATA,
         WarningCode.MISSING_RECORD,
+        WarningCode.MISSING_METADATA,
         WarningCode.INVALID_RECORD,
         WarningCode.INVALID_RECORD_PATH,
         WarningCode.FILESYSTEM_LAYOUT_ERROR,
+        WarningCode.MISSING_RECORD_SELF_ENTRY,
         WarningCode.RECORD_PATH_OUTSIDE_PREFIX,
     ):
         warning = AnalysisWarning(
