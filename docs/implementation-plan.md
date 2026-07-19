@@ -10,9 +10,9 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-06: local wheel integration fixtureとcross-platform golden coverageを追加する |
+| 次のタスク | P2-06b: cross-platform layout golden coverageを追加する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 9 / 10タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b `done`） |
+| Phase 2進捗 | 10 / 12タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b、P2-06a `done`） |
 | Blocker | なし |
 | 次の成果物 | local wheel integration fixtureとcross-platform golden coverage |
 
@@ -210,7 +210,9 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `done` |
 | P2-05a | Phase 2 | versioned JSON schemaとpure deterministic JSON serializerを実装する | `done` |
 | P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `done` |
-| P2-06 | Phase 2 | local wheel integration fixtureとcross-platform golden coverageを追加する | `todo` |
+| P2-06a | Phase 2 | local wheelによる実install integrationを追加する | `done` |
+| P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `todo` |
+| P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -388,13 +390,64 @@ P2-05aで固定するschema v1契約:
 
 - 通常の成功系testをpackage indexから分離し、local wheel installationとtarget layoutのgolden fixtureでPhase 2の測定契約を継続検証する。
 
-完了条件:
+分割:
+
+- P2-06aはstdlibだけで生成するdeterministicなlocal universal wheelを用い、実際の`uv` resolver/installからtext/JSON reportまでをnetworkなしで検証する。
+- P2-06bはP2-06aのwheel fixtureを再利用し、Linux、macOS、Windowsのscripts/data/headersを含むtarget layout golden testを追加する。host platformに依存するinstall実行はP2-06aだけの責務とする。
+
+P2-06aの完了条件:
 
 - test-owned wheelとlocal `--find-links`を用い、resolver/installからJSON/text reportまでnetworkなしで検証する。
+- shared dependencyを持つ複数root package、entry point script、wheel `.data` のscripts/data/headersを実install結果で検証する。
+- F-004の通常testにおけるPyPI/package index依存を、実成功経路について解消する。
+
+P2-06bの完了条件:
+
 - Linux、macOS、Windowsのscripts/data/headersを含むlayout golden testを追加し、PyPI smoke testは通常test suiteから分離する。
-- F-004の通常testにおけるPyPI/package index依存を解消する。
+
+### P2-07: wheel-only installer safety
+
+目的:
+
+- package-size analysisが第三者sdist build backendを暗黙に実行しないよう、wheel-onlyを既定にし、build許可を明示opt-inとして結果contextへ残す。
+
+完了条件:
+
+- installerはwheel-onlyを既定とし、sdistのみの候補を安全な利用者向けエラーとして扱う。
+- buildを許可するoptionは明示的で、JSON contextのbuild policyとREADMEの安全性契約が一致する。
+- local wheel integrationとsdist拒否の回帰testがnetworkなしで成功する。
 
 ## 作業記録
+
+### 2026-07-19: P2-06a local wheelによる実install integration
+
+状態: `done`
+
+実装:
+
+- [`tests/local_wheel_factory.py`](../tests/local_wheel_factory.py)にstdlibだけを使うreview可能なfixture factoryを追加した。`uv-packsize-fixture-root-a`、`uv-packsize-fixture-root-b`、`uv-packsize-fixture-shared`のversion `1.0.0` universal wheelを、固定ZIP timestamp/permission、lexical member order、`ZIP_STORED`、validな`METADATA`/`WHEEL`/3-column `RECORD`で毎回同じbytesへ生成する。両rootはsharedへ依存し、root-aはPython source、console entry point、`.data/scripts`、`.data/data/share/...`、`.data/headers/...`を含む。
+- [`tests/test_local_wheel_integration.py`](../tests/test_local_wheel_integration.py)でmockなしに`sys.executable -m uv_packsize`を実行するintegration testを追加した。child environmentは`PATH`とWindows必須process variableだけをallowlistし、task-local HOME/USERPROFILE/APPDATA/LOCALAPPDATA/TMPと明示的な`UV_NO_INDEX=1`、local `UV_FIND_LINKS`、`UV_OFFLINE=1`、`UV_NO_PROGRESS=1`、`UV_NO_CONFIG=1`、`UV_NO_CACHE=1`、`UV_PYTHON_DOWNLOADS=never`だけを渡す。親の`UV_CONFIG_FILE`、`UV_CONSTRAINT`、`PYTHONPATH`を毒入れしても継承しないことを回帰testで確認し、resolver、venv作成、install、inventory、text/JSON rendererをnetwork/config非依存で通す。
+- default textが3 fixture distributionだけを表示し、`--bin`がPOSIX `bin/`またはWindows `Scripts/`下のconsole entry pointと`.data/scripts` payloadを表示してもfinal totalを変えないことを検証した。factory testはZIP memberとRECORD rowのexact coverage、self rowの空hash/size、各non-self memberの再計算したURL-safe SHA-256 hashとbyte sizeを検証する。JSONはstdoutだけをparseし、schema v1、進捗だけのstderr、complete/no warnings、3 distributionのversion、root-aのpython/metadata/script/data category、header/data suffix、global totalとdistribution sumの一致を検証した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_local_wheel_integration.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused integration testは4件成功した。
+- 全275テストが成功し、1件は既存skipである。Ruff format/lint、ty、README生成整合性、lock check、whitespace checkも成功した。
+
+引き継ぎ:
+
+- F-004は`partial`とする。通常suiteの実CLI成功経路はlocal wheelとlocal find-linksへ移行済みだが、Linux/macOS/Windows target layout goldenとPyPI smoke testの分離はP2-06bで完了する。
+- P2-07でwheel-onlyをdefaultにするまでは、実CLIのbuild policyは`allow-build`のままである。P2-06aのfixtureにはsdistまたはbuild backendを含めない。
 
 ### 2026-07-19: P2-05b CLI JSON出力、README契約、error/exit behavior
 
@@ -1117,6 +1170,6 @@ git diff --check
 | F-001 | `RECORD`のsite-packages外パスを除外しており、scripts/data/headersを完全には測定できない | Phase 2 | `todo` |
 | F-002 | `--bin`がWindowsの`Scripts`を分析しない | Phase 2 | `todo` |
 | F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
-| F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | Phase 2 | `todo` |
+| F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | P2-06a/P2-06b | `partial` |
 | F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 2 | `todo` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
