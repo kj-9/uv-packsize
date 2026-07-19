@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 1: リリース品質の回復 |
 | `in_progress` | なし |
-| 次のタスク | P1-07: Phase 1変更のテスト補強 |
-| Phase 1進捗 | 6 / 9 完了 |
+| 次のタスク | P1-08: distribution artifactの検証 |
+| Phase 1進捗 | 7 / 9 完了 |
 | Blocker | なし |
-| 次の成果物 | release metadata、lock、error pathの回帰テスト補強 |
+| 次の成果物 | wheel/sdistとartifact metadata、CLI entry pointの検証 |
 
 ## ステータス定義
 
@@ -94,7 +94,7 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 | P1-04 | CIのlock検証とPython matrixを更新する | `done` | P1-03 | stale lockで失敗し、Python 3.10〜3.14を検証する |
 | P1-05 | subprocessエラー処理を統一する | `done` | P1-01 | 無効なPythonやinstall失敗でtracebackを出さない |
 | P1-06 | 測定契約と安全性をREADMEへ記載する | `done` | P1-01 | 含有範囲、単位、platform依存、sdistリスクが明記されている |
-| P1-07 | Phase 1変更のテストを補強する | `todo` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
+| P1-07 | Phase 1変更のテストを補強する | `done` | P1-02〜P1-06 | release metadata、lock、error pathの回帰テストがある |
 | P1-08 | distribution artifactを検証する | `todo` | P1-07 | wheel/sdistがbuildでき、version、metadata、CLI entry pointが正しい |
 | P1-09 | Phase 1総合検証と引き継ぎを行う | `todo` | P1-08 | 全検証が成功し、Phase 2の最初のタスクが具体化されている |
 
@@ -159,6 +159,18 @@ Phase 0で定義した将来の測定契約は設計案である。P1-06では�
 - Python、platform、extras、dependency resolutionによる結果差と、複数root packageの帰属情報がないことを明示する。
 - sdist build backend実行リスク、wheel-only未実装、一時venvへ限定したinstallを安全性契約として記載する。
 
+### P1-07 実施内容
+
+完了したタスク。
+
+変更:
+
+- P1-02〜P1-06の既存test coverageをrelease metadata、lock policy、CI契約、subprocess/error pathごとに監査する。
+- pyprojectとuv.lockのroot version、requires-python一致を検証する。
+- uv adapterの成功、OS起動失敗、stdout fallback、診断切り詰めを検証する。
+- `RECORD`欠損時にpackage本体を含めず`.dist-info`だけをfallback集計することを検証する。
+- network依存の存在しないpackage testを、P1-05で追加したmock resolver failure testへ置き換える。
+
 ## Phase 2以降の入口タスク
 
 Phase 1完了時に詳細分解する。現時点の入口は以下とする。
@@ -172,6 +184,51 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ## 作業記録
+
+### 2026-07-19: P1-07 Phase 1変更のテスト補強
+
+状態: `done`
+
+coverage監査:
+
+- P1-02: project version、Python要件、classifiersと、隔離metadataによるCLI `--version` exact出力を既存テストで検証済み。
+- P1-03: makefileの`--locked`境界を検証済み。追加でuv.lock root metadataとpyprojectのversion、requires-python一致を検証した。
+- P1-04: CIのPython 3.10〜3.14 matrix、独立lock check、3 jobのuv version pinを検証済み。
+- P1-05: adapter失敗情報、venv/install例外伝播、CLI traceback非表示、uv未検出を検証済み。追加でadapter成功、OSError変換、stdout fallback、診断3行制限、command secret非表示を検証した。
+- P1-06: README本文の実装詳細を固定する脆い文字列テストは追加せず、既存のCog生成整合性とレビューで検証した。
+
+変更:
+
+- pyprojectとuv.lockのroot version、requires-python一致をstdlibだけで検証するテストを追加した。
+- `_run_uv`が成功した`CompletedProcess`を返すことと、`OSError`をcommand、exit code 127、診断を保持する`UvCommandError`へ変換することを検証した。
+- stderrが空の場合のstdout fallback、診断の3行制限、省略表示、command secret非表示を検証した。
+- `RECORD`欠損時にpackage本体を含めず`.dist-info`内のfileだけを数えるfixture testを追加した。
+- project version testはhard-codeを避け、CLI version testと同じ`EXPECTED_VERSION`を再利用するようにした。
+- 既存の存在しないPyPI packageを使うerror testを削除した。resolver/install失敗はネットワーク不要のmock CLI testで同等以上に検証する。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_uv_packsize.py -q -k 'lock_root or run_uv or command_failure or formats_uv_failures or missing_record'
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- P1-07の対象テスト8件は成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全23テストが成功した。
+- `uv lock --check`は成功した。
+- whitespace errorはなかった。
+
+意図的に残したgap:
+
+- wheel/sdist build artifactとentry pointの検証はP1-08で行う。
+- 通常の成功経路に残るPyPI依存テストのlocal wheel fixture移行はF-004としてPhase 2で行う。
+- README契約の文章表現を固定するテストは追加せず、文書レビューと生成整合性で管理する。
 
 ### 2026-07-19: P1-06 測定契約と安全性のREADME記載
 

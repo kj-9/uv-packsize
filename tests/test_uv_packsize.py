@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from uv_packsize.cli import (
     UvCommandError,
     _analyze_package_sizes,
+    _command_failure_message,
     _create_venv,
     _install_package,
     _run_uv,
@@ -24,7 +25,9 @@ def test_project_metadata():
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
     project = pyproject.partition("[project]")[2].partition("\n[")[0]
 
-    assert re.search(r'^version = "0\.1\.2"$', project, re.MULTILINE)
+    assert re.search(
+        rf'^version = "{re.escape(EXPECTED_VERSION)}"$', project, re.MULTILINE
+    )
     assert re.search(r'^requires-python = ">=3\.10"$', project, re.MULTILINE)
 
     classifier_block = re.search(
@@ -44,6 +47,38 @@ def test_project_metadata():
         "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.14",
     }
+
+
+def test_lock_root_metadata_matches_project():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
+    project = pyproject.partition("[project]")[2].partition("\n[")[0]
+    lock = (PROJECT_ROOT / "uv.lock").read_text()
+    lock_header = lock.partition("[[package]]")[0]
+
+    project_name = re.search(r'^name = "([^"]+)"$', project, re.MULTILINE)
+    project_version = re.search(r'^version = "([^"]+)"$', project, re.MULTILINE)
+    project_python = re.search(r'^requires-python = "([^"]+)"$', project, re.MULTILINE)
+    lock_python = re.search(r'^requires-python = "([^"]+)"$', lock_header, re.MULTILINE)
+    assert project_name is not None
+    assert project_version is not None
+    assert project_python is not None
+    assert lock_python is not None
+
+    root_packages = [
+        package
+        for package in lock.split("[[package]]")[1:]
+        if re.search(
+            rf'^name = "{re.escape(project_name.group(1))}"$',
+            package,
+            re.MULTILINE,
+        )
+    ]
+    assert len(root_packages) == 1
+    lock_version = re.search(r'^version = "([^"]+)"$', root_packages[0], re.MULTILINE)
+    assert lock_version is not None
+
+    assert lock_version.group(1) == project_version.group(1)
+    assert lock_python.group(1) == project_python.group(1)
 
 
 def test_makefile_uses_locked_uv_runs():
@@ -134,17 +169,6 @@ def test_basic_package_size():
         assert "Total size:" in result.output
 
 
-def test_non_existent_package():
-    runner = CliRunner()
-    with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["non-existent-package-12345"])
-        assert result.exit_code != 0
-        assert (
-            "Error installing package" in result.output
-            or "No solution found" in result.output
-        )
-
-
 def test_bin_option():
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -196,6 +220,52 @@ def test_run_uv_preserves_failure_details(monkeypatch):
     empty_output = UvCommandError(command, 1, None, None)
     assert empty_output.stdout == ""
     assert empty_output.stderr == ""
+
+
+def test_run_uv_returns_successful_result(monkeypatch):
+    command = ["uv", "example"]
+    completed = subprocess.CompletedProcess(
+        command, 0, stdout="captured stdout", stderr="captured stderr"
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.subprocess.run", lambda _command, **_kwargs: completed
+    )
+
+    assert _run_uv(command) is completed
+
+
+def test_run_uv_converts_os_error(monkeypatch):
+    command = ["uv", "example"]
+
+    def fail(_command, **_kwargs):
+        raise OSError("could not start uv")
+
+    monkeypatch.setattr("uv_packsize.cli.subprocess.run", fail)
+
+    with pytest.raises(UvCommandError) as raised:
+        _run_uv(command)
+
+    assert raised.value.command == tuple(command)
+    assert raised.value.exit_code == 127
+    assert raised.value.stdout == ""
+    assert raised.value.stderr == "could not start uv"
+    assert isinstance(raised.value.__cause__, OSError)
+
+
+def test_command_failure_uses_stdout_fallback_and_truncates_details():
+    error = UvCommandError(
+        ["uv", "pip", "install", "secret-command-value"],
+        9,
+        "first line\nsecond line\nthird line\nfourth line",
+        "",
+    )
+
+    message = _command_failure_message(error)
+
+    assert "Could not install the requested packages (uv exit code 9)." in message
+    assert "first line\nsecond line\nthird line\n..." in message
+    assert "fourth line" not in message
+    assert "secret-command-value" not in message
 
 
 def test_create_venv_propagates_uv_failure(monkeypatch, tmp_path):
@@ -346,6 +416,21 @@ def test_package_sizes_include_bytecode_for_standalone_modules(tmp_path):
     sizes = _analyze_package_sizes(tmp_path / "venv")
 
     assert sizes["six"] == len(b"source") + len(b"compiled")
+
+
+def test_missing_record_counts_only_dist_info_files(tmp_path):
+    site_packages = tmp_path / "venv" / "lib" / "python3.13" / "site-packages"
+    package_dir = site_packages / "example_package"
+    dist_info = site_packages / "example_package-1.0.dist-info"
+    package_dir.mkdir(parents=True)
+    dist_info.mkdir()
+    (package_dir / "__init__.py").write_bytes(b"package contents")
+    metadata = dist_info / "METADATA"
+    metadata.write_text("Name: example-package\nVersion: 1.0\n")
+
+    sizes = _analyze_package_sizes(tmp_path / "venv")
+
+    assert sizes == {"example-package": metadata.stat().st_size}
 
 
 def test_package_name_falls_back_when_metadata_is_missing(tmp_path):
