@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-04: 既存temporary venv/CLIを`AnalysisResult`測定engineへ接続する |
+| 次のタスク | P2-04b: CLIを新測定engineとrendererへ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 4タスク完了（P2-01、P2-02a、P2-02b、P2-03 `done`） |
+| Phase 2進捗 | 5タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a `done`） |
 | Blocker | なし |
-| 次の成果物 | 現行CLIから新測定engineを使用するend-to-end flow |
+| 次の成果物 | 新測定engineを使用するCLI/renderer接続 |
 
 ## ステータス定義
 
@@ -205,7 +205,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-02a | Phase 2 | RECORD path resolverとsingle-distribution collectorを実装する | `done` |
 | P2-02b | Phase 2 | 全distribution scanと明示的なsupplemental discoveryを実装する | `done` |
 | P2-03 | Phase 2 | installed environmentの測定contextとinventoryを`AnalysisResult`へ接続する | `done` |
-| P2-04 | Phase 2 | 既存temporary venv/CLIを`AnalysisResult`測定engineへ接続する | `todo` |
+| P2-04a | Phase 2 | temporary venvから測定contextとinventory layoutを検出するadapterを実装する | `done` |
+| P2-04b | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -324,7 +325,61 @@ P2-04へ送る事項:
 - 既存temporary venv作成/install flowから、実際のPython、platform、architecture、uv version、build/bytecode条件、path flavor/case ruleを含む`ResolutionContext`と`InventoryLayout`を構築し、新しいanalysis boundaryへ接続する。
 - 現行text出力の公開互換性を維持しながら集計sourceを`AnalysisResult`へ切り替え、subprocess failureの既存Click error契約を保持する。CLI接続に必要なlocal installed fixtureとrenderer境界はP2-04で具体化する。
 
+### P2-04a: temporary venv environment discovery adapter
+
+目的:
+
+- temporary venv の実際の interpreter と sysconfig から、inventory に渡せる immutable な`ResolutionContext`と`InventoryLayout`群を構築する。
+
+固定した契約:
+
+- venv Pythonを一度だけ`-I`で実行し、`sys.prefix`、`sys.executable`、`major.minor.micro`形式の完全な数値Python version、sysconfig platform、machine、`os.name`、purelib、platlibをJSONとして取得する。callerが渡すrequirements、uv version、build policy、bytecode、extras、index identity、resolution strategyは推測・置換しない。
+- prefix/base prefix/executableを照合してtemporary venv identityを検証する。purelib/platlibはprefix内であることを確認してから、それぞれのsite-packages directoryでcase sensitivityを明示probeする。
+- reported/invoked interpreterは各prefix下のlexical containmentを先に確認し、その後`samefile`で同一実体か照合する。venv内hardlink aliasは許容するが、venv外からのaliasは拒否する。probe stdoutはstrict UTF-8でdecodeし、破損byte列はtyped invalid-probe errorにする。
+- physical pathとtarget logical pathを分離して`InventoryLayout`を構築し、同一のcompatible layoutはdedupeする。payload builderをfilesystem/subprocessから分離し、POSIX host上でもWindows logical layoutをunit testできる。
+- discovery failureはraw path、requirements、subprocess stdout/stderrを含まないtyped/sanitized errorで返す。CLI、uv command/version query、inventory analysis、rendererへの接続はP2-04bの責務とする。
+
 ## 作業記録
+
+### 2026-07-19: P2-04a temporary venv environment discovery adapter
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/environment.py`](../uv_packsize/environment.py)を追加し、temporary venvのPythonを`-I`で一度だけJSON probeして`InstalledEnvironment(context, layouts)`を構築する`discover_installed_environment`を実装した。
+- probe payloadから実際の完全な数値Python version、sysconfig platform、architecture、path flavorを得て、caller suppliedのresolution設定とともにimmutableな`ResolutionContext`へ渡す。purelib/platlibのphysical/logical layoutを検証・dedupeし、同一physical siteへ矛盾したlogical siteを割り当てない。
+- prefix、base prefix、interpreterを検証し、site-packages外をprobeしない。siteごとのcase probeはUUID directoryを作成してcase aliasを確認し、finallyで削除する。
+- interpreter identityはraw path文字列ではなく`samefile`で照合し、同時にreported/invoked executableの各prefix下containmentを検証する。subprocess stdoutはbytesで取得してstrict UTF-8 decodeする。
+- invalid venv/probe/layout/case/filesystem failureは`EnvironmentDiscoveryError`のcodeとsanitized targetだけで表し、raw paths、requirements、subprocess diagnosticsをmessageへ含めない。
+
+テスト:
+
+- [`tests/test_environment.py`](../tests/test_environment.py)を追加し、caller contextの保持、purelib/platlib dedupe、actual temporary venv probeの成功、isolated venv Pythonの単一probe、siteごとのcase probe、sanitized error、case mismatchを検証した。valid JSONでもnumeric Python versionでないpayloadとmalformed UTF-8を拒否し、venv内/外hardlink alias、Windows case variantを検証する。Windowsではsymlink権限を要求しないtemporary venv fixtureを使用する。
+- POSIX filesystem上でWindows logical prefix/site-packagesを構築し、Windows path flavorとcase-insensitive layoutをhost依存なしに検証した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_environment.py -q
+uv run --locked ruff check uv_packsize/environment.py tests/test_environment.py
+uv run --locked ruff format uv_packsize/environment.py tests/test_environment.py
+uv run --locked ty check
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused environment testsは13件成功し、Windows限定case testは非Windows hostでは1件skipした。全test suiteは213件成功、1件skipした。
+- Ruff format/lint、ty、README生成整合性、lock checkはすべて成功した。
+- whitespace errorはなかった。
+
+スコープ境界:
+
+- CLI、uv command/version query、`analyze_installed_environment`、renderer、JSON、networkは接続していない。P2-04bで既存temporary venv flowからこのadapterとmeasurement engineを接続する。
 
 ### 2026-07-19: P2-03 installed environment contextとinventoryのAnalysisResult接続
 
