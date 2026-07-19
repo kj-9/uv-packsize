@@ -10,10 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-01: AnalysisResultとfile inventoryのデータモデル設計 |
+| 次のタスク | P2-02: RECORDを基準とするfilesystem inventory collectorの設計・実装 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
+| Phase 2進捗 | 1タスク完了（P2-01 `done`、P2-02が次） |
 | Blocker | なし |
-| 次の成果物 | 内部result modelと集計不変条件のnetwork不要unit tests |
+| 次の成果物 | prefix全体の所有fileをmodelへ変換するnetwork不要inventory collector |
 
 ## ステータス定義
 
@@ -200,7 +201,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 
 | ID | Phase | 入口タスク | 状態 |
 |---|---|---|---|
-| P2-01 | Phase 2 | `AnalysisResult`とfile inventoryのデータモデルを設計する | `todo` |
+| P2-01 | Phase 2 | `AnalysisResult`とfile inventoryのデータモデルを設計する | `done` |
+| P2-02 | Phase 2 | `RECORD`を基準とするfilesystem inventory collectorを設計・実装する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -214,25 +216,26 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 
 責務:
 
-- `ResolutionContext`: 入力requirements、Python、platform、extras、resolver/build条件など、結果比較に必要な解決contextを保持する。subprocess実行は担当しない。
-- `FileEntry`: 測定prefixを基準とする表示用path、global dedupe用`canonical_identity`、logical bytes、file category、`RECORD`由来かどうか、warningに必要な属性を保持する。sizeは非負とし、所有distribution fieldは持たない。
+- `ResolutionContext`: 入力requirements、Python、platform、extras、index identity、resolver条件、明示的な`BuildPolicy`、bytecode条件など、結果比較に必要な解決contextを保持する。subprocess実行は担当しない。
+- `FileEntry`: 測定prefixを基準とする表示用path、global dedupe用`canonical_identity`、logical bytes、file category、`FileOrigin`、symlink targetを保持する。sizeは非負とし、所有distribution fieldは持たない。`FileOrigin`は`RECORD`そのもの、RECORD entryから生成されたfile、authoritative metadata欠落時のfallback、明示的な補助scanによるdiscoveryを区別する。
 - `DistributionResult`: distributionの正規化nameとresolved version、所有する`FileEntry`、distribution単位のtyped warning/completenessを保持する。FileEntry ownershipの唯一のsource of truthはこのcontainer関係とし、distribution totalはfile inventoryから導出して独立した可変値として二重管理しない。
-- `AnalysisResult`: `ResolutionContext`、全distribution、globalのtyped warning/completenessを保持する。global totalは含有対象の一意なfile inventoryから導出する。
+- `AnalysisResult`: `ResolutionContext`、全distribution、globalのtyped warning/completenessを保持する。global totalは含有対象の一意なfile inventoryから導出し、重複所有はimmutableな`DuplicateOwnership` relationでも説明する。
 - warningはfree textではなく、`WarningCode`等のenum/codeと対象identityを持つstructured valueで表す。completenessもboolではなく`complete`/`incomplete`等のenumとし、warning collectionは重複を除いたdeterministicなtuple/orderで保持する。
 
 不変条件:
 
 - 各distribution totalは、そのdistributionに含まれる`FileEntry.logical_bytes`の合計と一致する。
-- `FileEntry.canonical_identity`は非空のimmutable stringとする。値は実際に数えるfileについてcollectorが生成する、測定prefix相対・separator統一・`.`/`..`除去・対象platformのcase rule適用後のidentityとし、symlinkの場合は解決先を識別できる情報を反映する。同じidentityはglobal totalで同じfileとして扱う。
+- `FileEntry.path`と`canonical_identity`は、実際に数えるfileについてcollectorが生成する測定prefix相対のlexical installed pathとする。`/`へseparatorを統一し、absolute path、空component、`.`、`..`、backslash、NULを許可しない。`canonical_identity`には対象platformのcase ruleも適用する。同じidentityはglobal totalで同じfileとして扱い、symlink解決先はidentityへ混ぜず別の`symlink_target` fieldに保持する。
 - global totalは`canonical_identity`で一意化した含有inventoryから導出し、複数root packageや重複所有で黙って二重計上しない。
 - distribution totalsの合計とglobal totalが異なり得る場合は、shared/duplicate ownershipとしてモデル上説明でき、warningまたは明示的な関係を保持する。
+- 異なるdistributionが同じ`canonical_identity`を所有する場合、logical bytes、category、symlink targetが一致しなければ矛盾したinventoryとして拒否する。
 - missing `RECORD`、存在しないfile、重複所有などの不完全性を正常値へ潰さず、completenessとwarningで表現できる。
 - interpreter、venv基礎file、uv cacheは暗黙にinventoryへ追加しない。
 
 スコープ境界:
 
 - P2-01ではmodel moduleとnetwork不要unit testsを追加する。既存CLIの集計処理への接続、実filesystem inventory収集、prefix外path対応は行わない。
-- prefix-relative path化、platformごとのcase/path normalization、symlink解決と`canonical_identity`生成はinventory collectorの責務とする。P2-01のmodelはcollectorから供給されたidentityを検証・比較するだけで、filesystemへ問い合わせない。
+- prefix-relative lexical path化、platformごとのcase/path normalization、symlink targetの読取と`canonical_identity`生成はinventory collectorの責務とする。P2-01のmodelはcollectorから供給された値を検証・比較するだけで、filesystemへ問い合わせない。
 - JSON schema、JSON/text renderer、公開CLI optionはP2-01では実装しない。model fieldは将来deterministic serializationできる値に限定し、renderer接続は後続taskとして分解する。
 - wheel-only installer、local wheel integration fixture、`KiB`/`MiB`表示変更も後続taskとする。
 
@@ -243,6 +246,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 - 異なるdistributionに同じ`canonical_identity`を持つFileEntryを置くpure fixtureで、distribution totalsには各ownership分が現れ、global totalでは一度だけ数えることを検証する。
 - negative sizeや不正なidentityなど、モデル単体で防げるinvalid stateを拒否する。
 - warning code、対象identity、completenessがtyped valueで表現され、warning tupleのdedupeとorderが入力順に依存せずdeterministicであることをunit testsで検証する。
+- modelはfrozen、slots、keyword-onlyとし、collectionをtupleへ防御的に変換して深いimmutabilityとhashabilityを保つ。file、distribution、warningの入力順が結果の等価性へ影響しない。
 - testsは一時的なPython objectだけで構築し、uv、resolver、network、実package installを必要としない。
 - 既存CLIの出力と公開契約を変更せず、`make ci-check`、`make test`、`uv lock --check`が成功する。
 
@@ -254,7 +258,71 @@ Phase 1からの引き継ぎ:
 - F-001〜F-003はinventoryと表示、F-004はlocal fixture、F-005はwheel-only installerの後続設計へ引き継ぐ。
 - GitHub Actions上のworkflow実走、release、tag、PyPI publishは未実施である。
 
+### P2-02: RECORDを基準とするfilesystem inventory collector
+
+目的:
+
+- temporary environmentのinstalled metadataとfilesystemを読み、P2-01のmodel不変条件を満たす`DistributionResult`群へ変換する。
+
+責務と境界:
+
+- 測定prefix、site-packages location、対象platformのpath/case ruleを明示的な入力として受け取り、既存Python環境やuv cacheへ触れない。
+- `.dist-info/RECORD`をCSVとして読み、relative/absolute RECORD pathを安全に測定prefix内のlexical installed pathへ変換する。prefix外pathや不正pathを黙って含めない。
+- site-packages外でもprefix内に所有されるscripts、data、headersをdistributionへ帰属させ、Windows `Scripts` layoutもfixtureで扱う。
+- fileのlogical bytes、category、`FileOrigin`、symlink targetを収集する。symlinkをfollowしてidentityを置き換えず、logical bytesをsymlink自身と解決先のどちらで定義するかを実装前に測定契約として固定する。
+- missing RECORD、missing file、同一RECORD内のduplicate entryをtyped warningへ変換する。duplicate RECORD entryは`WarningCode.DUPLICATE_RECORD_ENTRY`を使用し、collector内で一意化してmodelのintra-distribution identity制約を守る。
+- missing RECORD時のfallback範囲、generated bytecodeとRECORD fileの対応、補助scanを行う条件を明示し、`RECORD`、`GENERATED`、`FALLBACK`、`DISCOVERED`のoriginを使い分ける。
+- `AnalysisResult`へのcontext接続、既存CLI/rendererの置換、JSON、dependency graph、installer policy変更は行わない。
+
+完了条件:
+
+- network不要のtemporary filesystem fixturesだけで、POSIX/Windowsの代表layout、prefix内のsite-packages外file、missing RECORD/file、duplicate RECORD entry、generated bytecode、fallback、symlinkを検証する。
+- path escape、absolute/relative RECORD path、separator/case normalizationの境界がテストされ、collector出力がP2-01 modelへ追加補正なしで渡せる。
+- distribution totalが収集したinventoryと一致し、warning/completenessが欠損やmetadata異常を保持する。
+- 実filesystemやplatform依存部分を小さいadapter境界へ閉じ込め、platform layoutの大半をpure fixtureで検証できる。
+- 既存CLIの出力と公開契約を変更せず、対象テスト、`make ci-check`、`make test`、`uv lock --check`が成功する。
+
 ## 作業記録
+
+### 2026-07-19: P2-01 AnalysisResultとfile inventoryのデータモデル設計
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/models.py`](../uv_packsize/models.py)へPython 3.10対応・標準ライブラリのみのfrozen/slots/keyword-only modelを追加した。
+- `ResolutionContext`はrequirements順を保持しつつextrasとindex identityをset semanticsで正規化し、buildとbytecode条件を必須のtyped値として保持する。
+- `FileEntry`はownershipを持たず、prefix相対のlexical path、case-normalized canonical identity、logical bytes、category、4種類のorigin、独立したsymlink targetを保持する。
+- `DistributionResult`のtotalとcompleteness、`AnalysisResult`のglobal totalとcompletenessをinventory/warningから導出し、可変な重複集計値を持たせなかった。
+- cross-distributionの同一identityはglobal totalで一度だけ数え、immutableなowners relationとderived warningで説明する。size、category、symlink targetの矛盾や同一distribution内の重複identityは拒否する。
+- warningはtyped code、target kind、target identityで表現し、dedupe/orderを決定的にした。missing RECORD/fileはincompleteを導出し、duplicate ownership/RECORD entryはwarningを保持しつつcompleteとして扱う。
+
+テスト:
+
+- [`tests/test_models.py`](../tests/test_models.py)へnetwork・resolver・filesystemを使わない63件のunit testsを追加した。
+- immutable/hashable、collection防御、distribution/extra name正規化、invalid string/path/size/type、warning target、input permutation、total dedupe、ownership relation、conflicting signature、completenessを検証した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_models.py -q
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- 対象63テストが成功した。
+- Ruff format check、Ruff lint、ty、README生成整合性はすべて成功した。
+- 全88テストが成功した。
+- lockは同期済みで、whitespace errorはなかった。
+
+残課題:
+
+- filesystem collector、logical symlink sizeの定義、各`FileOrigin`を選ぶ収集規則はP2-02で実装・fixture化する。
+- P2-01のmodelは既存CLIへ接続していないため、公開出力と現行測定挙動は変更していない。
 
 ### 2026-07-19: P1-09 Phase 1総合検証と引き継ぎ
 
