@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "measurement": {
+    "kind": "installed-logical-size",
+    "unit": "bytes",
+    "ownership": "distribution-owned-files",
+    "deduplication": "canonical-identity"
+  },
+  "context": {
+    "requirements": [
+      {
+        "input_index": 0,
+        "kind": "named",
+        "name": "example-pkg",
+        "extras": [
+          "docs",
+          "speed"
+        ],
+        "has_specifier": true,
+        "has_marker": true
+      },
+      {
+        "input_index": 1,
+        "kind": "direct-url",
+        "name": null,
+        "extras": [],
+        "has_specifier": false,
+        "has_marker": false
+      },
+      {
+        "input_index": 2,
+        "kind": "local-path",
+        "name": null,
+        "extras": [],
+        "has_specifier": false,
+        "has_marker": false
+      },
+      {
+        "input_index": 3,
+        "kind": "opaque",
+        "name": null,
+        "extras": [],
+        "has_specifier": false,
+        "has_marker": false
+      }
+    ],
+    "python_version": "3.14.0",
+    "platform": "manylinux_2_28_x86_64",
+    "architecture": "x86_64",
+    "path_flavor": "posix",
+    "case_rule": "sensitive",
+    "uv_version": "0.11.3",
+    "build_policy": "wheel-only",
+    "compile_bytecode": false,
+    "extras": [
+      "docs",
+      "speed"
+    ],
+    "index_identifiers": [
+      "internal-primary",
+      "pypi"
+    ],
+    "resolution_strategy": "highest"
+  },
+  "distributions": [
+    {
+      "name": "alpha-pkg",
+      "version": "1.0",
+      "files": [
+        {
+          "path": "bin/alpha-tool",
+          "canonical_identity": "bin/alpha-tool",
+          "logical_bytes": 5,
+          "category": "script",
+          "origin": "generated",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/alpha-pkg.dist-info/METADATA",
+          "canonical_identity": "lib/alpha-pkg.dist-info/METADATA",
+          "logical_bytes": 2,
+          "category": "metadata",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/shared.py",
+          "canonical_identity": "lib/shared.py",
+          "logical_bytes": 7,
+          "category": "python",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/日本語.py",
+          "canonical_identity": "lib/日本語.py",
+          "logical_bytes": 11,
+          "category": "data",
+          "origin": "discovered",
+          "is_symlink": false
+        }
+      ],
+      "warnings": [],
+      "completeness": "complete",
+      "totals": {
+        "logical_bytes": 25
+      }
+    },
+    {
+      "name": "zeta",
+      "version": "2.0",
+      "files": [
+        {
+          "path": "lib/shared.py",
+          "canonical_identity": "lib/shared.py",
+          "logical_bytes": 7,
+          "category": "python",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/zeta-link",
+          "canonical_identity": "lib/zeta-link",
+          "logical_bytes": 3,
+          "category": "other",
+          "origin": "record",
+          "is_symlink": true
+        },
+        {
+          "path": "lib/zeta.so",
+          "canonical_identity": "lib/zeta.so",
+          "logical_bytes": 13,
+          "category": "native",
+          "origin": "fallback",
+          "is_symlink": false
+        }
+      ],
+      "warnings": [
+        {
+          "code": "missing-record",
+          "target_kind": "distribution",
+          "target_identity": "zeta==2.0"
+        }
+      ],
+      "completeness": "incomplete",
+      "totals": {
+        "logical_bytes": 23
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "duplicate-ownership",
+      "target_kind": "file",
+      "target_identity": "lib/shared.py"
+    },
+    {
+      "code": "missing-file",
+      "target_kind": "file",
+      "target_identity": "lib/欠落.py"
+    }
+  ],
+  "duplicate_ownerships": [
+    {
+      "canonical_identity": "lib/shared.py",
+      "owners": [
+        "alpha-pkg",
+        "zeta"
+      ]
+    }
+  ],
+  "completeness": "incomplete",
+  "totals": {
+    "global_logical_bytes": 41,
+    "distribution_logical_bytes": 48
+  }
+}

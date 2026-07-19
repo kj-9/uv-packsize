@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-05: versioned JSON schemaとdeterministic JSON出力を実装する |
+| 次のタスク | P2-05b: CLI JSON出力、README契約、error/exit behaviorを接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 7 / 9タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2 `done`） |
+| Phase 2進捗 | 8 / 10タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a `done`） |
 | Blocker | なし |
-| 次の成果物 | versioned JSON schemaとdeterministic JSON出力 |
+| 次の成果物 | CLI JSON出力とREADMEの公開契約 |
 
 ## ステータス定義
 
@@ -208,7 +208,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-04a | Phase 2 | temporary venvから測定contextとinventory layoutを検出するadapterを実装する | `done` |
 | P2-04b1 | Phase 2 | `AnalysisResult`のpure text rendererを実装する | `done` |
 | P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `done` |
-| P2-05 | Phase 2 | versioned JSON schemaとdeterministic JSON出力を実装する | `todo` |
+| P2-05a | Phase 2 | versioned JSON schemaとpure deterministic JSON serializerを実装する | `done` |
+| P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `todo` |
 | P2-06 | Phase 2 | local wheel integration fixtureとcross-platform golden coverageを追加する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -370,6 +371,17 @@ P2-04へ送る事項:
 - schema contract、JSON error/exit behavior、比較に必要なmeasurement contextをREADMEへ記載する。
 - requirementはcredential-bearing URLをrawのまま公開JSONへ出さないrepresentationを定義し、serialization testで非漏えいを検証する。
 
+分割:
+
+- P2-05aは`AnalysisResult`だけを受けるpure serializer、committed schema v1、golden test、安全なrequirement/index representationを完了単位とする。CLI、README、exit behaviorは変更しない。
+- P2-05bはCLIのJSON option、stdout/error/exit behavior、READMEの公開契約を接続する。P2-05aのschema v1を変更せず利用する。
+
+P2-05aで固定するschema v1契約:
+
+- top-level fieldは`schema_version`、`measurement`、`context`、`distributions`、`warnings`、`duplicate_ownerships`、`completeness`、`totals`の順で必ず存在する。v1のmajor versionは互換性境界であり、破壊的変更はschema versionを上げる。
+- requirementはraw text、specifier、marker、URL、credential、digestを含めず、入力順を表す安全なprojectionだけを出力する。index identityはASCII symbolic aliasだけをmodelで許可する。
+- file inventoryはpath/canonical identity、logical bytes、category、origin、symlink有無だけを出力し、raw symlink targetは出力しない。
+
 ### P2-06: local wheel integration fixtureとcross-platform golden coverage
 
 目的:
@@ -383,6 +395,39 @@ P2-04へ送る事項:
 - F-004の通常testにおけるPyPI/package index依存を解消する。
 
 ## 作業記録
+
+### 2026-07-19: P2-05a pure JSON schema/serializer
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/json_render.py`](../uv_packsize/json_render.py)に、`AnalysisResult`だけを受けるschema v1 serializerを追加した。top-levelの全fieldとnested object fieldは固定順で常に出力し、`json.dumps(..., ensure_ascii=False, allow_nan=False, indent=2, sort_keys=False)`による末尾LF 1個のJSONを返す。
+- [`schemas/analysis-result-v1.schema.json`](../schemas/analysis-result-v1.schema.json)をcommitted closed schemaとして追加した。v1 major versionを互換性境界とし、context enum、file category/origin、warning、safe requirement projection、totalsを全field必須で固定した。
+- raw requirement/specifier/marker/URL/credential/digestを出力しない入力順付きprojectionを定義し、symlink targetは`is_symlink`へ縮約した。direct URLはabsolute URI formまたはVCS file URI、安全なlocal pathは明示的なrelative/absolute/tilde/UNC pathとhost付き形式を含むlocal file URIだけを認め、曖昧なtargetは`opaque`へ落とす。`ResolutionContext.index_identifiers`もURL/path/userinfoを受け付けない1〜64文字のASCII symbolic aliasへ制限した。
+- [`tests/test_json_render.py`](../tests/test_json_render.py)と[`tests/golden/analysis-result-v1.json`](../tests/golden/analysis-result-v1.json)を追加し、exact golden、input permutation、empty/totals、credential/local path/symlink target非漏えい、valid URL/VCS/file URIとmalformed/bare-relative/`C:relative`を含むrequirement classifier、index validation、schema/golden shapeをnetwork不要で検証した。goldenはduplicate ownership、不完全warning、Unicode path、全file categoryと全originを含む。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_json_render.py tests/test_models.py -q
+uv run --locked ruff format --check uv_packsize/json_render.py uv_packsize/models.py tests/test_json_render.py
+uv run --locked ruff check uv_packsize/json_render.py uv_packsize/models.py tests/test_json_render.py
+uv run --locked ty check
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- JSON/model対象100テスト、全264テスト（1 skipped）が成功した。
+- Ruff format/lint、ty、README生成整合性、lock check、whitespace checkが成功した。
+
+スコープ境界:
+
+- CLI option、stdout/error/exit behavior、READMEのJSON公開契約はP2-05bで接続する。P2-05aでは既存CLIとREADMEを変更していない。
 
 ### 2026-07-19: P2-04b2 CLIを新測定engineとrendererへ接続
 

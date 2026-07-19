@@ -11,6 +11,7 @@ from enum import Enum
 
 _NORMALIZED_NAME_SEPARATOR = re.compile(r"[-_.]+")
 _VALID_DISTRIBUTION_NAME = re.compile(r"^[A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*$")
+_VALID_INDEX_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 
 
@@ -260,7 +261,7 @@ def _completeness(warnings: tuple[AnalysisWarning, ...]) -> Completeness:
 class ResolutionContext:
     """Conditions that must match before two analysis results are compared.
 
-    ``index_identifiers`` must be sanitized by the caller and must never contain
+    ``index_identifiers`` are ASCII symbolic aliases only, never URLs, paths, or
     credentials. The model stores identities only; it does not contact indexes.
     """
 
@@ -307,19 +308,21 @@ class ResolutionContext:
                 )
             ),
         )
+        index_identifiers = _string_tuple(
+            self.index_identifiers,
+            "index_identifiers",
+        )
+        if any(
+            not _VALID_INDEX_IDENTIFIER.fullmatch(identifier)
+            for identifier in index_identifiers
+        ):
+            raise ValueError(
+                "index_identifiers must contain ASCII symbolic aliases only"
+            )
         object.__setattr__(
             self,
             "index_identifiers",
-            tuple(
-                sorted(
-                    set(
-                        _string_tuple(
-                            self.index_identifiers,
-                            "index_identifiers",
-                        )
-                    )
-                )
-            ),
+            tuple(sorted(set(index_identifiers))),
         )
         if not isinstance(self.build_policy, BuildPolicy):
             raise TypeError("build_policy must be a BuildPolicy")

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kj-9/uv-packsize/schemas/analysis-result-v1.schema.json",
+  "title": "uv-packsize analysis result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "measurement", "context", "distributions", "warnings", "duplicate_ownerships", "completeness", "totals"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "measurement": {"$ref": "#/$defs/measurement"},
+    "context": {"$ref": "#/$defs/context"},
+    "distributions": {"type": "array", "items": {"$ref": "#/$defs/distribution"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}},
+    "duplicate_ownerships": {"type": "array", "items": {"$ref": "#/$defs/duplicateOwnership"}},
+    "completeness": {"enum": ["complete", "incomplete"]},
+    "totals": {"$ref": "#/$defs/rootTotals"}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*$"},
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*\\u0000).+$"},
+    "measurement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "unit", "ownership", "deduplication"],
+      "properties": {
+        "kind": {"const": "installed-logical-size"},
+        "unit": {"const": "bytes"},
+        "ownership": {"const": "distribution-owned-files"},
+        "deduplication": {"const": "canonical-identity"}
+      }
+    },
+    "requirement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_index", "kind", "name", "extras", "has_specifier", "has_marker"],
+      "properties": {
+        "input_index": {"type": "integer", "minimum": 0},
+        "kind": {"enum": ["named", "direct-url", "local-path", "opaque"]},
+        "name": {"anyOf": [{"$ref": "#/$defs/name"}, {"type": "null"}]},
+        "extras": {"type": "array", "items": {"$ref": "#/$defs/name"}, "uniqueItems": true},
+        "has_specifier": {"type": "boolean"},
+        "has_marker": {"type": "boolean"}
+      }
+    },
+    "context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requirements", "python_version", "platform", "architecture", "path_flavor", "case_rule", "uv_version", "build_policy", "compile_bytecode", "extras", "index_identifiers", "resolution_strategy"],
+      "properties": {
+        "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/requirement"}},
+        "python_version": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "path_flavor": {"enum": ["posix", "windows"]},
+        "case_rule": {"enum": ["sensitive", "insensitive"]},
+        "uv_version": {"type": "string", "minLength": 1},
+        "build_policy": {"enum": ["wheel-only", "allow-build"]},
+        "compile_bytecode": {"type": "boolean"},
+        "extras": {"type": "array", "items": {"$ref": "#/$defs/name"}, "uniqueItems": true},
+        "index_identifiers": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}, "uniqueItems": true},
+        "resolution_strategy": {"type": "string", "minLength": 1}
+      }
+    },
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "canonical_identity", "logical_bytes", "category", "origin", "is_symlink"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "canonical_identity": {"$ref": "#/$defs/path"},
+        "logical_bytes": {"type": "integer", "minimum": 0},
+        "category": {"enum": ["python", "native", "data", "metadata", "script", "other"]},
+        "origin": {"enum": ["record", "generated", "fallback", "discovered"]},
+        "is_symlink": {"type": "boolean"}
+      }
+    },
+    "warning": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "target_kind", "target_identity"],
+      "properties": {
+        "code": {"enum": ["duplicate-ownership", "duplicate-record-entry", "filesystem-error", "filesystem-layout-error", "invalid-record", "invalid-record-path", "invalid-metadata", "missing-file", "missing-metadata", "missing-record", "missing-record-self-entry", "record-path-outside-prefix", "unsupported-file-type"]},
+        "target_kind": {"enum": ["distribution", "file"]},
+        "target_identity": {"type": "string", "minLength": 1}
+      }
+    },
+    "totals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["logical_bytes"],
+      "properties": {"logical_bytes": {"type": "integer", "minimum": 0}}
+    },
+    "distribution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version", "files", "warnings", "completeness", "totals"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "version": {"type": "string", "minLength": 1},
+        "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}},
+        "completeness": {"enum": ["complete", "incomplete"]},
+        "totals": {"$ref": "#/$defs/totals"}
+      }
+    },
+    "duplicateOwnership": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonical_identity", "owners"],
+      "properties": {
+        "canonical_identity": {"$ref": "#/$defs/path"},
+        "owners": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/name"}, "uniqueItems": true}
+      }
+    },
+    "rootTotals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["global_logical_bytes", "distribution_logical_bytes"],
+      "properties": {
+        "global_logical_bytes": {"type": "integer", "minimum": 0},
+        "distribution_logical_bytes": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
