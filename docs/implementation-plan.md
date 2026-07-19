@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-05b: CLI JSON出力、README契約、error/exit behaviorを接続する |
+| 次のタスク | P2-06: local wheel integration fixtureとcross-platform golden coverageを追加する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 8 / 10タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a `done`） |
+| Phase 2進捗 | 9 / 10タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b `done`） |
 | Blocker | なし |
-| 次の成果物 | CLI JSON出力とREADMEの公開契約 |
+| 次の成果物 | local wheel integration fixtureとcross-platform golden coverage |
 
 ## ステータス定義
 
@@ -209,7 +209,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-04b1 | Phase 2 | `AnalysisResult`のpure text rendererを実装する | `done` |
 | P2-04b2 | Phase 2 | CLIを新測定engineとrendererへ接続し、公開text契約を移行する | `done` |
 | P2-05a | Phase 2 | versioned JSON schemaとpure deterministic JSON serializerを実装する | `done` |
-| P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `todo` |
+| P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `done` |
 | P2-06 | Phase 2 | local wheel integration fixtureとcross-platform golden coverageを追加する | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -395,6 +395,38 @@ P2-05aで固定するschema v1契約:
 - F-004の通常testにおけるPyPI/package index依存を解消する。
 
 ## 作業記録
+
+### 2026-07-19: P2-05b CLI JSON出力、README契約、error/exit behavior
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/cli.py`](../uv_packsize/cli.py)に`--json`を追加し、成功時は`render_analysis_json(result)`の末尾LFを保ったままstdoutへ1回だけ出力するようにした。text report、進捗、completion messageをstdoutへ混在させない。
+- JSON modeではcalculation、venv creation、install、analysis、completionの進捗をstderrへ切り替えた。既存のtext modeはstdout出力を維持した。
+- `--bin`をtext-only presentation optionとしてhelpへ明記し、JSON modeではinventoryまたはserializerを変えないため`--json --bin`のbytesは`--json`と一致する。
+- 既存のsanitized `ClickException`境界を維持し、JSON modeのoperational failureはexit 1、空stdout、stderr上の安全な進捗/エラーとした。invalid usageはClickのexit 2を維持し、programmer errorは捕捉しない。
+- [`README.md`](../README.md)にschema v1、top-level fieldの用途、安全で非可逆なrequirement representation、raw symlink target非出力、stdout/stderr/exit contract、redirect例、`--bin`との相互作用を記載した。
+
+テスト:
+
+- 実stdlib venv fixtureでJSONをparseし、stdoutがpure serializerと完全一致すること、進捗がstderrだけに出ること、repeatと`--bin`有無でJSON bytesが一致することを検証した。
+- help、default text output、uv/discovery operational failureの空stdoutとcredential/path/traceback非露出を回帰テストで検証した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_uv_packsize.py -q
+make ci-check
+make test
+uv lock --check
+git diff --check
+```
+
+結果:
+
+- CLI対象34テスト、全271テスト（1 skipped）が成功した。
+- Ruff format/lint、ty、README生成整合性、lock check、whitespace checkが成功した。
 
 ### 2026-07-19: P2-05a pure JSON schema/serializer
 

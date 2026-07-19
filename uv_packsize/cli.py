@@ -17,6 +17,7 @@ from uv_packsize.environment import (
     discover_installed_environment,
 )
 from uv_packsize.inventory import InventoryError
+from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy
 from uv_packsize.render import render_analysis_report
 
@@ -64,8 +65,8 @@ def _run_uv(command):
     return result
 
 
-def _create_venv(venv_dir, python=None):
-    click.echo("Creating virtual environment...")
+def _create_venv(venv_dir, python=None, *, err=False):
+    click.echo("Creating virtual environment...", err=err)
 
     command = ["uv", "venv"]
     if python:
@@ -79,12 +80,13 @@ def _create_venv(venv_dir, python=None):
     return python_executable
 
 
-def _install_package(python_executable, package_names):
+def _install_package(python_executable, package_names, *, err=False):
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
     possessive = "its" if package_count == 1 else "their"
     click.echo(
-        f"Installing {package_count} requested {package_label} and {possessive} dependencies..."
+        f"Installing {package_count} requested {package_label} and {possessive} dependencies...",
+        err=err,
     )
     install_command = [
         "uv",
@@ -145,7 +147,13 @@ def _analysis_failure_message(error: Exception) -> str:
 @click.option(
     "--bin",
     is_flag=True,
-    help="Display RECORD-owned scripts separately without changing the total.",
+    help="Text output only: display RECORD-owned scripts separately without changing the total.",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Write the versioned analysis result as JSON to stdout.",
 )
 @click.option(
     "-p",
@@ -153,7 +161,7 @@ def _analysis_failure_message(error: Exception) -> str:
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
-def cli(package_names, bin, python_version):
+def cli(package_names, bin, json_output, python_version):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
         raise click.ClickException(
@@ -163,20 +171,23 @@ def cli(package_names, bin, python_version):
 
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
-    click.echo(f"Calculating size for {package_count} requested {package_label}...")
+    click.echo(
+        f"Calculating size for {package_count} requested {package_label}...",
+        err=json_output,
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         try:
-            python_executable = _create_venv(venv_dir, python_version)
-            _install_package(python_executable, package_names)
+            python_executable = _create_venv(venv_dir, python_version, err=json_output)
+            _install_package(python_executable, package_names, err=json_output)
             uv_version = _uv_version()
         except UvCommandError as error:
             raise click.ClickException(_command_failure_message(error)) from None
         except UvVersionError:
             raise click.ClickException("Could not determine the uv version.") from None
 
-        click.echo("Analyzing sizes...")
+        click.echo("Analyzing sizes...", err=json_output)
         try:
             environment = discover_installed_environment(
                 venv_path=Path(venv_dir),
@@ -200,6 +211,9 @@ def cli(package_names, bin, python_version):
         ) as error:
             raise click.ClickException(_analysis_failure_message(error)) from None
 
-        click.echo(render_analysis_report(result, show_scripts=bin))
+        if json_output:
+            click.echo(render_analysis_json(result), nl=False)
+        else:
+            click.echo(render_analysis_report(result, show_scripts=bin))
 
-    click.echo("\nCalculation complete.")
+    click.echo("\nCalculation complete.", err=json_output)

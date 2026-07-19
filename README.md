@@ -42,8 +42,9 @@ Usage: uv-packsize [OPTIONS] PACKAGE_NAMES...
 
 Options:
   --version          Show the version and exit.
-  --bin              Display RECORD-owned scripts separately without changing
-                     the total.
+  --bin              Text output only: display RECORD-owned scripts separately
+                     without changing the total.
+  --json             Write the versioned analysis result as JSON to stdout.
   -p, --python TEXT  Specify the Python version for the virtual environment.
   --help             Show this message and exit.
 
@@ -91,6 +92,37 @@ Total size:          50.13 KiB
 Calculation complete.
 ```
 
+### JSON output
+
+Use `--json` to write the complete, versioned analysis result to standard
+output. It is intended for recording, comparison, and further processing:
+
+```bash
+uv-packsize requests==2.32.5 --json > analysis.json
+```
+
+Successful JSON output conforms to the committed
+[analysis result schema v1](./schemas/analysis-result-v1.schema.json). Its
+top-level fields describe the schema version, measurement definition,
+resolution context, resolved distributions and their file inventories,
+warnings/completeness, duplicate ownership, and global/distribution totals.
+Schema version 1 is a compatibility boundary; consumers should check
+`schema_version` before interpreting a result.
+
+The JSON representation is deliberately safe to share as a measurement record:
+requirements are non-reversible summaries rather than their raw text, and it
+does not contain requirement URLs, credentials, digests, raw local paths, or
+raw symlink targets. File paths in the measured temporary environment remain
+part of the inventory because they are needed to explain the measurement.
+
+With `--json`, standard output contains exactly one JSON document and no
+progress messages, text table, or completion message. Progress and sanitized
+operational errors are written to standard error instead. A successful analysis
+exits with status 0; an operational failure exits with status 1 and leaves
+standard output empty; invalid command-line usage uses Click's status 2.
+`--bin` is a text-presentation option and has no effect on JSON bytes, so
+`--json --bin` is accepted but produces the same JSON as `--json`.
+
 ## Measurement
 
 `uv-packsize` creates a temporary virtual environment, installs all requested
@@ -136,9 +168,8 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
   resolver normally installs a shared dependency once. The output does not
   distinguish direct, transitive, or shared dependencies, or attribute a shared
   dependency's size to individual root packages.
-- The text output is not a reproducible analysis record. There is no versioned
-  JSON output yet, and the report does not preserve the full measurement
-  context needed for comparisons.
+- Text output is intended for interactive use. For a versioned record with the
+  measurement context needed for comparison, use `--json`.
 
 ### Installation safety
 

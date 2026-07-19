@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -7,6 +8,7 @@ import venv
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -25,6 +27,7 @@ from uv_packsize.environment import (
     EnvironmentDiscoveryErrorCode,
 )
 from uv_packsize.inventory import InventoryScanError, InventoryScanErrorCode
+from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy
 
 EXPECTED_VERSION = "0.1.2"
@@ -313,21 +316,40 @@ def _mock_successful_uv_version(monkeypatch):
 
 
 def _run_local_layout(
-    monkeypatch, installed_venv, package_names, *, show_scripts=False
+    monkeypatch,
+    installed_venv,
+    package_names,
+    *,
+    show_scripts=False,
+    json_output=False,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
 
-    def create_venv(venv_dir, _python=None):
+    def create_venv(venv_dir, _python=None, *, err=False):
+        assert err is json_output
+        click.echo("Creating virtual environment...", err=err)
         shutil.copytree(venv_path, venv_dir, symlinks=True)
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
+    def install_package(_python_executable, names, *, err=False):
+        assert err is json_output
+        package_count = len(names)
+        package_label = "package" if package_count == 1 else "packages"
+        possessive = "its" if package_count == 1 else "their"
+        click.echo(
+            f"Installing {package_count} requested {package_label} and {possessive} dependencies...",
+            err=err,
+        )
+
     monkeypatch.setattr("uv_packsize.cli._create_venv", create_venv)
-    monkeypatch.setattr("uv_packsize.cli._install_package", lambda *_args: None)
+    monkeypatch.setattr("uv_packsize.cli._install_package", install_package)
     _mock_successful_uv_version(monkeypatch)
     arguments = [*package_names]
     if show_scripts:
         arguments.append("--bin")
+    if json_output:
+        arguments.append("--json")
     return CliRunner().invoke(cli, arguments)
 
 
@@ -362,6 +384,7 @@ def test_cli_analyzes_actual_local_venv_layout_once(monkeypatch, installed_venv)
     assert "Analyzing sizes..." in result.output
     assert "sample" in result.output
     assert _reported_total(result.output).endswith("KiB")
+    assert result.stderr == ""
     assert len(calls) == 1
     context = calls[0]["context"]
     assert context.requirements == ("sample==1.0",)
@@ -391,6 +414,91 @@ def test_bin_is_presentation_only_for_prefix_wide_record_files(
     assert "Binaries in .venv/bin" in with_scripts.output
     assert "sample-cli" in with_scripts.output
     assert _reported_total(default.output) == _reported_total(with_scripts.output)
+
+
+def test_cli_json_writes_only_the_stable_serializer_to_stdout(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    real_analyze = __import__(
+        "uv_packsize.cli", fromlist=["analyze_installed_environment"]
+    )
+    original = real_analyze.analyze_installed_environment
+    results = []
+
+    def capture_result(**kwargs):
+        result = original(**kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr("uv_packsize.cli.analyze_installed_environment", capture_result)
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == render_analysis_json(results[0])
+    assert json.loads(result.stdout)["schema_version"] == 1
+    assert "Calculating size" not in result.stdout
+    assert "Package Sizes" not in result.stdout
+    assert result.stderr == (
+        "Calculating size for 1 requested package...\n"
+        "Creating virtual environment...\n"
+        "Installing 1 requested package and its dependencies...\n"
+        "Analyzing sizes...\n"
+        "\nCalculation complete.\n"
+    )
+
+
+def test_cli_json_is_repeatable_and_ignores_bin_presentation(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    repeated = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    with_bin = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        show_scripts=True,
+        json_output=True,
+    )
+
+    assert default.exit_code == repeated.exit_code == with_bin.exit_code == 0
+    assert default.stdout == repeated.stdout == with_bin.stdout
+    assert default.stderr == repeated.stderr == with_bin.stderr
+
+
+def test_cli_help_describes_json_and_bin_interaction():
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.output
+    assert "Write the versioned analysis result as JSON to stdout." in result.output
+    assert "--bin" in result.output
+    assert "Text output only:" in result.output
+
+
+def test_cli_json_invalid_usage_keeps_click_exit_code_two():
+    result = CliRunner().invoke(cli, ["--json"])
+
+    assert result.exit_code == 2
+    assert "Missing argument 'PACKAGE_NAMES...'" in result.output
 
 
 def test_cli_displays_resolved_distributions_and_incomplete_warning(
@@ -614,6 +722,45 @@ def test_cli_formats_uv_failures_without_traceback(
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.parametrize("failed_stage", ["venv", "install"])
+def test_cli_json_uv_failures_keep_stdout_empty_and_stderr_sanitized(
+    monkeypatch, failed_stage
+):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+
+    def run(command):
+        stage = "venv" if command[1] == "venv" else "install"
+        if stage == failed_stage:
+            raise UvCommandError(
+                [*command, "secret-command-value"],
+                2,
+                "https://token@example.invalid/simple",
+                "/private/tmp/venv: specific uv diagnostic",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("uv_packsize.cli._run_uv", run)
+    requirements = [
+        "private @ https://token@example.invalid/simple",
+        "/private/tmp/secret-package.whl",
+    ]
+    result = CliRunner().invoke(cli, ["--json", *requirements])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Calculating size for 2 requested packages..." in result.stderr
+    assert "Could not" in result.stderr
+    for unsafe_value in (
+        "secret-command-value",
+        "token@example.invalid",
+        "/private/tmp/venv",
+        "private @ https://token@example.invalid/simple",
+        "/private/tmp/secret-package.whl",
+        "Traceback",
+    ):
+        assert unsafe_value not in result.stderr
+
+
 def test_uv_version_requires_a_single_safe_version_line(monkeypatch):
     monkeypatch.setattr(
         "uv_packsize.cli._run_uv",
@@ -640,9 +787,11 @@ def test_cli_rejects_malformed_uv_version_without_echoing_output(monkeypatch):
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
     monkeypatch.setattr(
         "uv_packsize.cli._create_venv",
-        lambda _venv_dir, _python=None: "/venv/bin/python",
+        lambda _venv_dir, _python=None, **_kwargs: "/venv/bin/python",
     )
-    monkeypatch.setattr("uv_packsize.cli._install_package", lambda *_args: None)
+    monkeypatch.setattr(
+        "uv_packsize.cli._install_package", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         "uv_packsize.cli._run_uv",
         lambda command: subprocess.CompletedProcess(command, 0, "secret output", ""),
@@ -660,9 +809,11 @@ def test_cli_formats_uv_version_failure_without_traceback(monkeypatch):
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
     monkeypatch.setattr(
         "uv_packsize.cli._create_venv",
-        lambda _venv_dir, _python=None: "/venv/bin/python",
+        lambda _venv_dir, _python=None, **_kwargs: "/venv/bin/python",
     )
-    monkeypatch.setattr("uv_packsize.cli._install_package", lambda *_args: None)
+    monkeypatch.setattr(
+        "uv_packsize.cli._install_package", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         "uv_packsize.cli._run_uv",
         lambda command: (_ for _ in ()).throw(
@@ -718,9 +869,11 @@ def test_cli_sanitizes_expected_analysis_failures(monkeypatch, failure, expected
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
     monkeypatch.setattr(
         "uv_packsize.cli._create_venv",
-        lambda _venv_dir, _python=None: "/venv/bin/python",
+        lambda _venv_dir, _python=None, **_kwargs: "/venv/bin/python",
     )
-    monkeypatch.setattr("uv_packsize.cli._install_package", lambda *_args: None)
+    monkeypatch.setattr(
+        "uv_packsize.cli._install_package", lambda *_args, **_kwargs: None
+    )
     _mock_successful_uv_version(monkeypatch)
     if isinstance(failure, EnvironmentDiscoveryError):
         monkeypatch.setattr(
@@ -743,6 +896,49 @@ def test_cli_sanitizes_expected_analysis_failures(monkeypatch, failure, expected
     assert expected in result.stderr
     assert "secret-path" not in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_cli_json_sanitizes_discovery_failure_and_keeps_stdout_empty(monkeypatch):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "uv_packsize.cli._create_venv",
+        lambda _venv_dir, _python=None, **_kwargs: "/venv/bin/python",
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli._install_package", lambda *_args, **_kwargs: None
+    )
+    _mock_successful_uv_version(monkeypatch)
+    monkeypatch.setattr(
+        "uv_packsize.cli.discover_installed_environment",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            EnvironmentDiscoveryError(
+                EnvironmentDiscoveryErrorCode.INVALID_VENV,
+                "/private/tmp/secret-venv",
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--json",
+            "private @ https://token@example.invalid/simple",
+            "/private/tmp/secret-package.whl",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert (
+        "Could not inspect the temporary environment (invalid-venv)." in result.stderr
+    )
+    for unsafe_value in (
+        "token@example.invalid",
+        "/private/tmp/secret-venv",
+        "/private/tmp/secret-package.whl",
+        "Traceback",
+    ):
+        assert unsafe_value not in result.stderr
 
 
 def test_package_name_is_required():
