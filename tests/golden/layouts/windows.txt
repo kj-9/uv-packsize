@@ -1,0 +1,15 @@
+--- Package Sizes ---
+Package                      Size
+--------------------------  -----
+uv-packsize-fixture-root-a  864 B
+--------------------------  -----
+Total Package Size          864 B
+
+--- Binaries in .venv/bin ---
+Binary                                          Size
+----------------------------------------------  ----
+Scripts/uv-packsize-fixture-root-a-data-script  22 B
+----------------------------------------------  ----
+Total Binaries Size                             22 B
+
+Total size:  886 B

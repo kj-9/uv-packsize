@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "measurement": {
+    "kind": "installed-logical-size",
+    "unit": "bytes",
+    "ownership": "distribution-owned-files",
+    "deduplication": "canonical-identity"
+  },
+  "context": {
+    "requirements": [
+      {
+        "input_index": 0,
+        "kind": "named",
+        "name": "uv-packsize-fixture-root-a",
+        "extras": [],
+        "has_specifier": true,
+        "has_marker": false
+      }
+    ],
+    "python_version": "3.13.2",
+    "platform": "macosx_14_0_arm64",
+    "architecture": "aarch64",
+    "path_flavor": "posix",
+    "case_rule": "sensitive",
+    "uv_version": "0.11.3",
+    "build_policy": "wheel-only",
+    "compile_bytecode": false,
+    "extras": [],
+    "index_identifiers": [],
+    "resolution_strategy": "highest"
+  },
+  "distributions": [
+    {
+      "name": "uv-packsize-fixture-root-a",
+      "version": "1.0.0",
+      "files": [
+        {
+          "path": "bin/uv-packsize-fixture-root-a-data-script",
+          "canonical_identity": "bin/uv-packsize-fixture-root-a-data-script",
+          "logical_bytes": 22,
+          "category": "script",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "include/python3.13/uv_packsize_fixture_root_a.h",
+          "canonical_identity": "include/python3.13/uv_packsize_fixture_root_a.h",
+          "logical_bytes": 17,
+          "category": "data",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/METADATA",
+          "canonical_identity": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/METADATA",
+          "logical_bytes": 122,
+          "category": "metadata",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/RECORD",
+          "canonical_identity": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/RECORD",
+          "logical_bytes": 494,
+          "category": "metadata",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/WHEEL",
+          "canonical_identity": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/WHEEL",
+          "logical_bytes": 102,
+          "category": "metadata",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/entry_points.txt",
+          "canonical_identity": "lib/python3.13/site-packages/uv_packsize_fixture_root_a-1.0.0.dist-info/entry_points.txt",
+          "logical_bytes": 79,
+          "category": "metadata",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "lib/python3.13/site-packages/uv_packsize_fixture_root_a.py",
+          "canonical_identity": "lib/python3.13/site-packages/uv_packsize_fixture_root_a.py",
+          "logical_bytes": 75,
+          "category": "python",
+          "origin": "record",
+          "is_symlink": false
+        },
+        {
+          "path": "share/uv-packsize-fixture-root-a/payload.txt",
+          "canonical_identity": "share/uv-packsize-fixture-root-a/payload.txt",
+          "logical_bytes": 15,
+          "category": "data",
+          "origin": "record",
+          "is_symlink": false
+        }
+      ],
+      "warnings": [],
+      "completeness": "complete",
+      "totals": {
+        "logical_bytes": 926
+      }
+    }
+  ],
+  "warnings": [],
+  "duplicate_ownerships": [],
+  "completeness": "complete",
+  "totals": {
+    "global_logical_bytes": 926,
+    "distribution_logical_bytes": 926
+  }
+}

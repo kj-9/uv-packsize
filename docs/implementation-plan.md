@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-07-19
+最終更新: 2026-07-31
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 2: 信頼できる測定エンジン |
 | `in_progress` | なし |
-| 次のタスク | P2-06b: cross-platform layout golden coverageを追加する |
+| 次のタスク | P2-07: wheel-only installer safetyを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 10 / 12タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b、P2-06a `done`） |
+| Phase 2進捗 | 11 / 12タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b、P2-06a、P2-06b `done`） |
 | Blocker | なし |
-| 次の成果物 | local wheel integration fixtureとcross-platform golden coverage |
+| 次の成果物 | wheel-only installer safety |
 
 ## ステータス定義
 
@@ -211,7 +211,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-05a | Phase 2 | versioned JSON schemaとpure deterministic JSON serializerを実装する | `done` |
 | P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `done` |
 | P2-06a | Phase 2 | local wheelによる実install integrationを追加する | `done` |
-| P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `todo` |
+| P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `done` |
 | P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `todo` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -418,6 +418,28 @@ P2-06bの完了条件:
 - local wheel integrationとsdist拒否の回帰testがnetworkなしで成功する。
 
 ## 作業記録
+
+### 2026-07-31: P2-06b cross-platform layout golden coverage
+
+状態: `done`
+
+実装:
+
+- [`tests/test_layout_goldens.py`](../tests/test_layout_goldens.py)で、P2-06aのdeterministic local wheel fixtureからroot-a wheelを物理的には`tmp_path`配下へ展開し、Linux、macOS、Windowsの固定logical prefix/site-packages layoutへ対応する`RECORD`を生成するgolden testを追加した。各ケースはscripts、data、headersを含み、`analyze_installed_environment`までのinventory収集、`show_scripts=True`のtext renderer、JSON rendererを一貫して検証する。
+- [`tests/golden/layouts/`](../tests/golden/layouts/)にplatformごとのtext/JSON goldenを追加した。JSON goldenのglobal/distribution totalsとresult由来の合計を明示的に照合し、renderer出力は完全一致で比較する。Windows caseは`Scripts`、`Lib/site-packages`、case-insensitive canonical identityを固定する。
+- host platformに依存するresolver/installとentry point生成はP2-06aの実integration testの責務として維持し、本タスクでは実physical pathとtarget logical pathを分離した。低水準のRECORD path resolver unit testは重複追加していない。
+
+検証:
+
+- `uv run --locked pytest tests/test_layout_goldens.py`（3 passed）
+- `uv run --locked ruff format --check tests/test_layout_goldens.py`（passed）
+- `uv run --locked ruff check tests/test_layout_goldens.py`（passed）
+- `uv run --locked ty check`（passed）
+- `git diff --check`（passed）
+
+引き継ぎ:
+
+- P2-07でwheel-onlyをdefaultにし、sdist build許可を明示opt-inへ移行する。
 
 ### 2026-07-19: P2-06a local wheelによる実install integration
 
@@ -1170,6 +1192,6 @@ git diff --check
 | F-001 | `RECORD`のsite-packages外パスを除外しており、scripts/data/headersを完全には測定できない | Phase 2 | `todo` |
 | F-002 | `--bin`がWindowsの`Scripts`を分析しない | Phase 2 | `todo` |
 | F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
-| F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | P2-06a/P2-06b | `partial` |
+| F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | P2-06a/P2-06b | `done` |
 | F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 2 | `todo` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
