@@ -18,7 +18,9 @@ CRITICAL_MODULES = {
     "uv_packsize/__init__.py",
     "uv_packsize/__main__.py",
     "uv_packsize/cli.py",
+    "uv_packsize/dependency_graph.py",
 }
+EXPECTED_RUNTIME_DEPENDENCIES = {"click", "packaging"}
 
 
 def _verify_metadata(data, artifact):
@@ -49,8 +51,20 @@ def _verify_wheel(path):
             if required_path not in names:
                 raise ValueError(f"{path}: missing {required_path}")
         metadata = _verify_metadata(wheel.read(metadata_path), path)
-        if "click" not in metadata.get_all("Requires-Dist", []):
-            raise ValueError(f"{path}: missing Requires-Dist: click")
+        requires_dist = set(metadata.get_all("Requires-Dist", []))
+        missing_dependencies = EXPECTED_RUNTIME_DEPENDENCIES - requires_dist
+        if missing_dependencies:
+            raise ValueError(
+                f"{path}: missing Requires-Dist: {sorted(missing_dependencies)}"
+            )
+        unexpected_schema_files = sorted(
+            name for name in names if name.startswith("schemas/")
+        )
+        if unexpected_schema_files:
+            raise ValueError(
+                f"{path}: schemas are source-only artifacts, got "
+                f"{unexpected_schema_files}"
+            )
         entry_points = wheel.read(entry_points_path).decode("utf-8")
 
     parser = configparser.ConfigParser(interpolation=None)

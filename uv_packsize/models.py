@@ -44,12 +44,25 @@ def _string_tuple(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
     return result
 
 
-def _normalized_name(value: str) -> str:
+def normalize_distribution_name(value: str) -> str:
+    """Return the PEP 503 normalized form of a distribution name.
+
+    The value is deliberately validated before normalizing so callers in other
+    pure model modules can share the same identifier boundary as the analysis
+    inventory.  This function has no packaging-metadata or filesystem
+    dependency.
+    """
+
     _require_non_empty(value, "name")
     if not _VALID_DISTRIBUTION_NAME.fullmatch(value):
         raise ValueError("name must be a valid distribution name")
     normalized = _NORMALIZED_NAME_SEPARATOR.sub("-", value).lower()
     return normalized
+
+
+# Private compatibility alias for the existing model implementation.  New
+# modules should use the public name above.
+_normalized_name = normalize_distribution_name
 
 
 def _validate_lexical_path(value: str, field_name: str) -> None:

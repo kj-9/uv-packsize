@@ -15,12 +15,16 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "click"
+    "click",
+    "packaging",
 ]
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["uv_packsize*"]
 
 [project.urls]
 Homepage = "https://github.com/kj-9/uv-packsize"

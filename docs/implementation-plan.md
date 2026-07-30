@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 2: 信頼できる測定エンジン（`done`） |
+| 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-01: installed metadataからdependency graphを構築する |
+| 次のタスク | P3-01b: installed Core Metadata adapterをgraph coreへ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | installed metadata dependency graph |
+| 次の成果物 | installed Core Metadata adapterとgraph input境界 |
 
 ## ステータス定義
 
@@ -67,7 +67,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 0 | 測定契約とプロダクト方針の整理 | `done` |
 | Phase 1 | リリース品質の回復 | `done` |
 | Phase 2 | 信頼できる測定エンジン | `done` |
-| Phase 3 | サイズの理由を説明する | `todo` |
+| Phase 3 | サイズの理由を説明する | `in_progress` |
 | Phase 4 | CIでの継続管理 | `todo` |
 | Phase 5 | project/lockと比較分析 | `todo` |
 | Phase 6 | エコシステム連携 | `todo` |
@@ -213,7 +213,12 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-06a | Phase 2 | local wheelによる実install integrationを追加する | `done` |
 | P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `done` |
 | P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `done` |
-| P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
+| P3-01a | Phase 3 | installed metadata dependency graphのpure coreを実装する | `done` |
+| P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `todo` |
+| P3-02 | Phase 3 | dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する | `todo` |
+| P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
+| P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
+| P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
@@ -417,7 +422,63 @@ P2-06bの完了条件:
 - buildを許可するoptionは明示的で、JSON contextのbuild policyとREADMEの安全性契約が一致する。
 - local wheel integrationとsdist拒否の回帰testがnetworkなしで成功する。
 
+### P3-01a: installed metadata dependency graphのpure core
+
+目的:
+
+- installed file inventoryの測定値を変更せず、PEP 508 Core Metadataから依存関係とroot attributionを再現可能に組み立てる純粋な基盤を確立する。
+
+変更:
+
+- `packaging.Requirement`を使用し、root requirementと`Requires-Dist`をparseする。PEP 508 markerを標準ライブラリで正しくparse/evaluateできないため、runtime dependencyに`packaging`を追加する。
+- `AnalysisResult`、明示的な完全な`MarkerEnvironment`、adapterが供給する`InstalledDistributionMetadata`から、filesystem・subprocess・host environmentへアクセスせずgraphを構築する。
+- rootはsafe parsed nameで照合し、`recognized`、`inactive`、`version-mismatch`、`unmatched`、`unidentifiable`を区別する。marker評価不能なrootは名前を保持せず、root inputを対象とするtyped warningでincompleteとする。named direct referenceはinstalled nameが一致すればversionを検証せずrootとして認識し、specifierのpre-release判定はPackaging既定policyに従う。
+- edgeはactive markerかつinstalled targetの場合だけ生成する。markerは常に`extra=""`と選択された全extraで評価し、root入力に明示されたextrasだけを伝播の初期値とする。edgeはrequested extrasを保持し、同じsource/targetのactive requirementはextrasの和へcoalesceする。selected extrasはdependency requirementからtargetへ伝播し、markerのactive edgeが増えなくなるまで固定点で評価する。
+- nodeはrootごとのBFS reachabilityにより`root`、`direct`、`transitive`、`unattributed`へ分類する。2つ以上のrecognized rootから到達できるnodeをsharedとし、cycleを安全に扱う。
+- graph warning/completenessはsize analysisの`AnalysisWarning`と別のimmutable typed modelにする。warningにはnormalized distribution nameまたはroot input indexだけを保持し、raw requirement、URL、marker、parser diagnosticは保持・表示しない。
+
+完了条件:
+
+- input順序に依存しないimmutable graph、edge、root status、warningがunit testで確認できる。
+- explicit target marker environment、extras propagation、cycle、missing metadata/target、不正metadata、root status、安全なsecret非漏洩をnetwork不要のtestで確認できる。
+- `AnalysisResult`とschema v1 serializerの既存byte列を変更しない。
+
+スコープ境界・既知の制約:
+
+- P3-01aはCore Metadataを読むadapter、CLI、text/JSON renderer、schema v1へのgraph追加を実装しない。次のP3-01bでinstalled environmentからmetadataを安全に供給する境界を決める。
+- callerはhostの値を推測せず、全standard marker variableを持つtarget `MarkerEnvironment`を明示して渡す。metadataにないinstalled distribution、version不一致、active missing target、不正requirementはgraphを`incomplete`にする。
+- graphはsize totalを持たない。self/transitive byte attribution、表示、既存prefix mode、shared contributionの説明は後続P3 taskで扱う。
+
 ## 作業記録
+
+### 2026-07-31: P3-01a installed metadata dependency graph pure core
+
+状態: `done`
+
+実装:
+
+- `uv_packsize.models.normalize_distribution_name`を公開し、inventory modelとdependency graphで同一のPEP 503 name normalizationを使用するようにした。
+- immutableなinstalled metadata、explicit marker environment、root status、node/edge、warning/completeness modelとpure builderを`uv_packsize/dependency_graph.py`に追加した。
+- `packaging`をruntime dependencyへ追加してlockを同期した。graphは`Requirement`を利用してmarkerをexplicit target environmentだけで評価し、raw Core Metadataをresultへ残さない。
+- setuptools package discoveryを`uv_packsize*`へ明示的に限定し、source-onlyの`schemas/`をnamespace packageとして誤検出しないようにした。artifact verifierは`packaging`のruntime metadataとwheelへのschema混入がないことを確認する。
+- P3-01aのunit testsを追加し、marker/extras固定点、空extraを含むmarker評価、root marker失敗、pre-release policy、cycle、root照合、warningのsecret非漏洩、既存schema v1 JSONの不変性を検証した。
+
+検証:
+
+- `uv run --locked --no-sync ruff format uv_packsize/models.py uv_packsize/dependency_graph.py tests/test_dependency_graph.py` — 成功。
+- `uv run --locked --no-sync ruff check uv_packsize/models.py uv_packsize/dependency_graph.py tests/test_dependency_graph.py` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked --no-sync ty check uv_packsize tests` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked --no-sync pytest -q tests/test_dependency_graph.py tests/test_json_render.py` — 52 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv sync --locked` — editable buildを含め成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 300 passed, 1 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make verify-build` — wheel/sdist metadata、artifact inventory、installed entry pointを検証して成功。
+- `git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP3-01bとする。P3-01aのgraph modelを既存CLIやschema v1へ接続せず、まずinstalled Core Metadata adapterの安全なinput境界を確立する。
 
 ### 2026-07-31: P2-07 wheel-only installer safety
 

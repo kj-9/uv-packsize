@@ -62,6 +62,15 @@ def test_project_metadata():
     }
 
 
+def test_project_build_config_limits_setuptools_package_discovery():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
+    package_find = pyproject.partition("[tool.setuptools.packages.find]")[2].partition(
+        "\n["
+    )[0]
+
+    assert re.search(r'^include = \["uv_packsize\*"\]$', package_find, re.MULTILINE)
+
+
 def test_lock_root_metadata_matches_project():
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
     project = pyproject.partition("[project]")[2].partition("\n[")[0]

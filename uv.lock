@@ -206,6 +206,7 @@ version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "packaging" },
 ]
 
 [package.dev-dependencies]
@@ -217,7 +218,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "click" }]
+requires-dist = [
+    { name = "click" },
+    { name = "packaging" },
+]
 
 [package.metadata.requires-dev]
 dev = [
