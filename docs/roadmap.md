@@ -148,9 +148,10 @@ virtual environment作成時の`subprocess.CalledProcessError`が変換されて
 
 対応方針:
 
-- デフォルトは`--only-binary :all:`相当のwheel-onlyモードにする。
+- デフォルトは`--no-build`によるwheel-onlyモードにする。
 - sdistが必要な場合は`--allow-build`で明示的に許可する。
-- buildを許可したことと対象distributionを結果に記録する。
+- 結果には、buildを許可したかどうかのpolicyだけを記録する。uvの診断やcache内容から実際にbuildしたdistributionを推測しない。
+- 実際にbuildされたdistributionのprovenanceは、uvが信頼できるmachine-readableな情報を提供できる段階で上流連携として扱う。
 - クロスプラットフォーム分析はwheel-onlyに限定する。
 
 ### 4.7 テストの外部依存

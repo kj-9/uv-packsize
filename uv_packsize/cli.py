@@ -80,7 +80,14 @@ def _create_venv(venv_dir, python=None, *, err=False):
     return python_executable
 
 
-def _install_package(python_executable, package_names, *, err=False):
+def _install_package(
+    python_executable,
+    package_names,
+    *,
+    build_policy: BuildPolicy,
+    err=False,
+):
+    """Install requirements according to the explicit build permission."""
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
     possessive = "its" if package_count == 1 else "their"
@@ -95,6 +102,10 @@ def _install_package(python_executable, package_names, *, err=False):
         "--python",
         python_executable,
     ]
+    if build_policy is BuildPolicy.WHEEL_ONLY:
+        install_command.append("--no-build")
+    elif build_policy is not BuildPolicy.ALLOW_BUILD:
+        raise TypeError("build_policy must be a BuildPolicy")
     install_command.extend(package_names)
 
     _run_uv(install_command)
@@ -110,13 +121,20 @@ def _uv_version() -> str:
     return match.group(1)
 
 
-def _command_failure_message(error):
+def _command_failure_message(error, *, build_policy: BuildPolicy | None = None):
     """Return a public summary without forwarding uv's untrusted diagnostics."""
 
     arguments = error.command[1:]
     if arguments[:1] == ("venv",):
         summary = "Could not create the virtual environment"
     elif arguments[:2] == ("pip", "install"):
+        if build_policy is BuildPolicy.WHEEL_ONLY:
+            return (
+                "Could not install the requested packages with the wheel-only policy "
+                f"(uv exit code {error.exit_code}). A compatible wheel may be "
+                "unavailable; retry with --allow-build only if you trust the package "
+                "source and its build backend."
+            )
         summary = "Could not install the requested packages"
     elif arguments == ("--version",):
         summary = "Could not determine the uv version"
@@ -150,6 +168,11 @@ def _analysis_failure_message(error: Exception) -> str:
     help="Text output only: display RECORD-owned scripts separately without changing the total.",
 )
 @click.option(
+    "--allow-build",
+    is_flag=True,
+    help="Allow source builds during installation; disabled by default.",
+)
+@click.option(
     "--json",
     "json_output",
     is_flag=True,
@@ -161,7 +184,7 @@ def _analysis_failure_message(error: Exception) -> str:
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
-def cli(package_names, bin, json_output, python_version):
+def cli(package_names, bin, json_output, allow_build, python_version):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
         raise click.ClickException(
@@ -175,15 +198,23 @@ def cli(package_names, bin, json_output, python_version):
         f"Calculating size for {package_count} requested {package_label}...",
         err=json_output,
     )
+    build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         try:
             python_executable = _create_venv(venv_dir, python_version, err=json_output)
-            _install_package(python_executable, package_names, err=json_output)
+            _install_package(
+                python_executable,
+                package_names,
+                build_policy=build_policy,
+                err=json_output,
+            )
             uv_version = _uv_version()
         except UvCommandError as error:
-            raise click.ClickException(_command_failure_message(error)) from None
+            raise click.ClickException(
+                _command_failure_message(error, build_policy=build_policy)
+            ) from None
         except UvVersionError:
             raise click.ClickException("Could not determine the uv version.") from None
 
@@ -194,7 +225,7 @@ def cli(package_names, bin, json_output, python_version):
                 venv_python=Path(python_executable),
                 requirements=tuple(package_names),
                 uv_version=uv_version,
-                build_policy=BuildPolicy.ALLOW_BUILD,
+                build_policy=build_policy,
                 compile_bytecode=False,
                 extras=(),
                 index_identifiers=(),

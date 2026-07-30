@@ -118,6 +118,7 @@ def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_pat
     assert completed.returncode == 0
     result = json.loads(completed.stdout)
     assert result["schema_version"] == 1
+    assert result["context"]["build_policy"] == "wheel-only"
     assert result["completeness"] == "complete"
     assert result["warnings"] == []
     assert completed.stderr == (

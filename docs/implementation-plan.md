@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 2: 信頼できる測定エンジン |
+| 現在のPhase | Phase 2: 信頼できる測定エンジン（`done`） |
 | `in_progress` | なし |
-| 次のタスク | P2-07: wheel-only installer safetyを実装する |
+| 次のタスク | P3-01: installed metadataからdependency graphを構築する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
-| Phase 2進捗 | 11 / 12タスク完了（P2-01、P2-02a、P2-02b、P2-03、P2-04a、P2-04b1、P2-04b2、P2-05a、P2-05b、P2-06a、P2-06b `done`） |
+| Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | wheel-only installer safety |
+| 次の成果物 | installed metadata dependency graph |
 
 ## ステータス定義
 
@@ -66,7 +66,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 |---|---|---|
 | Phase 0 | 測定契約とプロダクト方針の整理 | `done` |
 | Phase 1 | リリース品質の回復 | `done` |
-| Phase 2 | 信頼できる測定エンジン | `in_progress` |
+| Phase 2 | 信頼できる測定エンジン | `done` |
 | Phase 3 | サイズの理由を説明する | `todo` |
 | Phase 4 | CIでの継続管理 | `todo` |
 | Phase 5 | project/lockと比較分析 | `todo` |
@@ -212,7 +212,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-05b | Phase 2 | CLI JSON出力、README契約、error/exit behaviorを接続する | `done` |
 | P2-06a | Phase 2 | local wheelによる実install integrationを追加する | `done` |
 | P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `done` |
-| P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `todo` |
+| P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `done` |
 | P3-01 | Phase 3 | installed metadataからdependency graphを構築する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -418,6 +418,36 @@ P2-06bの完了条件:
 - local wheel integrationとsdist拒否の回帰testがnetworkなしで成功する。
 
 ## 作業記録
+
+### 2026-07-31: P2-07 wheel-only installer safety
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/cli.py`](../uv_packsize/cli.py)でCLIの既定build policyを`BuildPolicy.WHEEL_ONLY`にし、installerへ同じpolicyを渡して`uv pip install ... --no-build`を実行するようにした。`--allow-build`を明示した場合だけ`--no-build`を省略し、environment discoveryとJSON contextにも同一の`BuildPolicy`を渡す。
+- wheel-only installの失敗は、raw uv diagnostics、requirements、pathを出さず、互換wheelがない可能性と信頼できるsourceに限った`--allow-build`再試行を案内する。build許可時のinstall失敗は既存のgenericな安全エラーを維持する。
+- [`README.md`](../README.md)のhelp、安全性契約、JSON context説明を更新した。`context.build_policy`は選択したbuild許可を記録するだけで、uv diagnosticsやcacheから実際にbuildしたdistributionを推測しないことを明記した。
+- unit/local-wheel integrationではinstaller commandの`--no-build`有無、default/opt-inのcontext policy、help、sanitized failureを検証した。sdist safety integrationはdefault拒否時の空JSON stdout、安全なstderr、build sentinel非実行を検証した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py tests/test_sdist_safety_integration.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは42件成功した。
+- 全282テストが成功し、1件は既存skipである。Ruff format/lint、ty、README生成整合性、lock check、whitespace checkも成功した。
+
+引き継ぎ:
+
+- F-005を解消した。Phase 2は12 / 12タスクを完了し、次のタスクはP3-01とする。実際にbuildされたdistributionのprovenanceは、uvのmachine-readableな根拠が得られるまで推測せず、F-007としてPhase 6へ送る。
 
 ### 2026-07-31: P2-06b cross-platform layout golden coverage
 
@@ -1189,9 +1219,10 @@ git diff --check
 
 | ID | 発見事項 | 割り当て | 状態 |
 |---|---|---|---|
-| F-001 | `RECORD`のsite-packages外パスを除外しており、scripts/data/headersを完全には測定できない | Phase 2 | `todo` |
-| F-002 | `--bin`がWindowsの`Scripts`を分析しない | Phase 2 | `todo` |
-| F-003 | 1024基準の値を`KB/MB`と表示している | Phase 2 | `todo` |
+| F-001 | `RECORD`のsite-packages外パスを除外しており、scripts/data/headersを完全には測定できない | P2-02a/P2-02b/P2-04b2 | `done` |
+| F-002 | `--bin`がWindowsの`Scripts`を分析しない | P2-02b/P2-04b1/P2-06b | `done` |
+| F-003 | 1024基準の値を`KB/MB`と表示している | P2-04b1/P2-04b2 | `done` |
 | F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | P2-06a/P2-06b | `done` |
-| F-005 | sdist build backendを暗黙に実行する可能性がある | Phase 2 | `todo` |
+| F-005 | sdist build backendを暗黙に実行する可能性がある | P2-07 | `done` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
+| F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない | P6-01（上流連携） | `todo` |

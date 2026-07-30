@@ -315,13 +315,14 @@ def _mock_successful_uv_version(monkeypatch):
     )
 
 
-def _run_local_layout(
+def _run_local_layout(  # noqa: PLR0913
     monkeypatch,
     installed_venv,
     package_names,
     *,
     show_scripts=False,
     json_output=False,
+    allow_build=False,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
@@ -332,8 +333,12 @@ def _run_local_layout(
         shutil.copytree(venv_path, venv_dir, symlinks=True)
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
-    def install_package(_python_executable, names, *, err=False):
+    def install_package(_python_executable, names, *, build_policy, err=False):
         assert err is json_output
+        expected_policy = (
+            BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
+        )
+        assert build_policy is expected_policy
         package_count = len(names)
         package_label = "package" if package_count == 1 else "packages"
         possessive = "its" if package_count == 1 else "their"
@@ -350,6 +355,8 @@ def _run_local_layout(
         arguments.append("--bin")
     if json_output:
         arguments.append("--json")
+    if allow_build:
+        arguments.append("--allow-build")
     return CliRunner().invoke(cli, arguments)
 
 
@@ -389,8 +396,35 @@ def test_cli_analyzes_actual_local_venv_layout_once(monkeypatch, installed_venv)
     context = calls[0]["context"]
     assert context.requirements == ("sample==1.0",)
     assert context.uv_version == "0.11.3"
-    assert context.build_policy is BuildPolicy.ALLOW_BUILD
+    assert context.build_policy is BuildPolicy.WHEEL_ONLY
     assert context.compile_bytecode is False
+
+
+def test_cli_allow_build_passes_permission_to_installer_and_context(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    calls = []
+    original = __import__(
+        "uv_packsize.cli", fromlist=["analyze_installed_environment"]
+    ).analyze_installed_environment
+
+    def analyze_once(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr("uv_packsize.cli.analyze_installed_environment", analyze_once)
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], allow_build=True
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["context"].build_policy is BuildPolicy.ALLOW_BUILD
 
 
 def test_bin_is_presentation_only_for_prefix_wide_record_files(
@@ -492,6 +526,9 @@ def test_cli_help_describes_json_and_bin_interaction():
     assert "Write the versioned analysis result as JSON to stdout." in result.output
     assert "--bin" in result.output
     assert "Text output only:" in result.output
+    assert "--allow-build" in result.output
+    assert "Allow source builds during installation; disabled by" in result.output
+    assert "default." in result.output
 
 
 def test_cli_json_invalid_usage_keeps_click_exit_code_two():
@@ -651,24 +688,51 @@ def test_create_venv_propagates_uv_failure(monkeypatch, tmp_path):
     assert raised.value is failure
 
 
-def test_install_package_propagates_uv_failure(monkeypatch):
+@pytest.mark.parametrize(
+    ("build_policy", "expected_command"),
+    [
+        (
+            BuildPolicy.WHEEL_ONLY,
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                "/venv/bin/python",
+                "--no-build",
+                "example==1.0",
+            ],
+        ),
+        (
+            BuildPolicy.ALLOW_BUILD,
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                "/venv/bin/python",
+                "example==1.0",
+            ],
+        ),
+    ],
+)
+def test_install_package_propagates_uv_failure(
+    monkeypatch, build_policy, expected_command
+):
     failure = UvCommandError(["uv", "pip", "install"], 1, "stdout", "stderr")
 
     def fail(command):
-        assert command == [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            "/venv/bin/python",
-            "example==1.0",
-        ]
+        assert command == expected_command
         raise failure
 
     monkeypatch.setattr("uv_packsize.cli._run_uv", fail)
 
     with pytest.raises(UvCommandError) as raised:
-        _install_package("/venv/bin/python", ["example==1.0"])
+        _install_package(
+            "/venv/bin/python",
+            ["example==1.0"],
+            build_policy=build_policy,
+        )
 
     assert raised.value is failure
 
@@ -677,7 +741,10 @@ def test_install_package_propagates_uv_failure(monkeypatch):
     ("failed_stage", "expected_summary"),
     [
         ("venv", "Could not create the virtual environment"),
-        ("install", "Could not install the requested packages"),
+        (
+            "install",
+            "Could not install the requested packages with the wheel-only policy",
+        ),
     ],
 )
 def test_cli_formats_uv_failures_without_traceback(
@@ -714,6 +781,9 @@ def test_cli_formats_uv_failures_without_traceback(
         )
     assert expected_summary in result.stderr
     assert "uv exit code 2" in result.stderr
+    if failed_stage == "install":
+        assert "A compatible wheel may be unavailable" in result.stderr
+        assert "--allow-build only if you trust the package source" in result.stderr
     assert "secret-command-value" not in public_output
     assert "token@example.invalid" not in public_output
     assert "/private/tmp/venv" not in public_output

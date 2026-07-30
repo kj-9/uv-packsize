@@ -44,6 +44,8 @@ Options:
   --version          Show the version and exit.
   --bin              Text output only: display RECORD-owned scripts separately
                      without changing the total.
+  --allow-build      Allow source builds during installation; disabled by
+                     default.
   --json             Write the versioned analysis result as JSON to stdout.
   -p, --python TEXT  Specify the Python version for the virtual environment.
   --help             Show this message and exit.
@@ -58,7 +60,9 @@ python -m uv_packsize --help
 
 If virtual environment creation or package installation fails, the command exits
 with status 1 and shows a concise failure summary with the `uv` exit code,
-without a Python traceback or raw `uv` diagnostic output.
+without a Python traceback or raw `uv` diagnostic output. A wheel-only install
+failure explains that a compatible wheel may be unavailable and directs you to
+`--allow-build` only when you trust the package source and its build backend.
 
 ### Example
 
@@ -173,15 +177,22 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 
 ### Installation safety
 
-The current installer is not wheel-only. If resolution selects an sdist,
-including when no compatible wheel is available, `uv pip install` may build it
-and execute third-party build backend code. The temporary virtual environment
-isolates the install destination; it is not a security sandbox. Build code runs
-with the current user's permissions and may access the filesystem or network
-outside that environment. Run the tool only for packages and package indexes
-you trust.
+The default installer is wheel-only: it passes `--no-build` to `uv pip install`
+and does not permit source builds. If no compatible wheel is available, the
+command fails without running that distribution's build backend. It may reuse a
+compatible wheel that was already built in the `uv` cache; the guarantee is that
+this invocation does not build an sdist.
 
-A wheel-only default is a roadmap target, not current behavior.
+Use `--allow-build` only as an explicit permission to let `uv` build from
+source when needed. A temporary virtual environment isolates the install
+destination; it is not a security sandbox. When builds are allowed, third-party
+build code runs with the current user's permissions and may access the
+filesystem or network outside that environment. Use it only for packages and
+package indexes you trust.
+
+The JSON `context.build_policy` records the permission selected for the run
+(`wheel-only` or `allow-build`). It does not claim which distributions actually
+built; the tool does not infer that from `uv` diagnostics or cache contents.
 
 Packages are installed into the command's temporary virtual environment, not
 directly into an existing user or system Python environment.
