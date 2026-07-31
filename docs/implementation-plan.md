@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-02: dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する |
+| 次のタスク | P3-02b: `--explain` text表示をpure resultへ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | dependency pathとdirect/transitive/shared attributionを表示可能なresultへの接続 |
+| 次の成果物 | `--explain` text presentation |
 
 ## ステータス定義
 
@@ -215,7 +215,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `done` |
 | P3-01a | Phase 3 | installed metadata dependency graphのpure coreを実装する | `done` |
 | P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `done` |
-| P3-02 | Phase 3 | dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する | `todo` |
+| P3-02a | Phase 3 | dependency path/explanationのpure immutable resultを実装する | `done` |
+| P3-02b | Phase 3 | `--explain` text表示をpure resultへ接続する | `todo` |
 | P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
@@ -467,7 +468,59 @@ P2-06bの完了条件:
 - graphは内部modelのままとし、既存text出力、JSON schema v1、公開CLI契約は変更しない。Core Metadata graphはinstalled metadataによる説明情報であり、resolver provenanceを主張するものではない。
 - dependency pathとdirect/transitive/shared attributionの表示可能なresultへの接続はP3-02で扱う。
 
+### P3-02a: dependency path/explanationのpure immutable result
+
+目的:
+
+- 既存のmeasurementおよびdependency graphを変更せず、recognized root inputごとの到達性と依存経路を再現可能な説明モデルへ合成する。
+
+変更:
+
+- `DependencyPath`、`DistributionAttribution`、`ExplainedAnalysisResult`と`explain_dependency_paths()`をpure moduleとして追加する。
+- recognized root inputは同名の重複入力もinput index単位で保持する。一方、既存graph nodeの`is_shared`は引き続き異なるroot distribution名の数だけで決まる。
+- 各rootからlexical orderのoutgoing edgeをBFSし、cycle-safeなsimple shortest pathを得る。canonical pathは`(edge_count, root_input_index, path_node_names)`で選び、root自身のzero-hop pathを優先する。
+- analysisとgraphのdistribution name/version集合、root input index、recognized root名、edge/reachabilityから再計算したnode kind/root names/sharedを検証し、手作りまたは不整合なgraph/pathを安全な`ValueError`で拒否する。
+- inventoryとgraphのcompletenessを別々に公開し、overall completenessは両方を合成する。byte totals、root別byte attribution、text/JSON renderer、CLIは変更しない。
+
+完了条件:
+
+- cycle、lexical tie、multi-root shared、同名root inputの重複、rootかつdependency、unattributed node、component completeness、mismatch/malformed graph/path、permutation/immutabilityをnetworkなしのunit testで確認する。
+- schema v1 serializerの出力bytesが変わらず、build artifactに新moduleが含まれる。
+
+### P3-02b: `--explain` text表示をpure resultへ接続する
+
+目的:
+
+- P3-02aの説明モデルを既存CLIのopt-in text presentationへ安全に接続する。
+
+スコープ境界:
+
+- public text契約、CLI option、rendererの設計とテストはこのtaskで扱う。schema v1 JSONは互換境界として変更しない。
+
 ## 作業記録
+
+### 2026-07-31: P3-02a dependency path/explanation pure result
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/dependency_paths.py`に、root input indexとsimple normalized node tupleを保持するimmutableな`DependencyPath`、nodeごとのroot input reachabilityとcanonical pathを保持する`DistributionAttribution`、および`ExplainedAnalysisResult`を追加した。
+- `explain_dependency_paths()`は、analysisとgraphのdistribution name/version集合、root input indexes、recognized root input名、edgeからBFS reachabilityを再計算し、graph nodeのkind/root names/shared labelを検証する。canonical pathはlexical edge orderのcycle-safe shortest pathから`(edge_count, root_input_index, path_node_names)`で決める。
+- 同名のrecognized root入力もinput index単位で到達性に残すが、既存graphの`is_shared`は異なるroot distribution名による既存の意味を保持する。inventory、graph、overallのcompletenessを分離した。
+- text renderer、CLI、README、schema v1 JSON、inventory/installed metadataは変更していない。artifact verifierは新moduleをwheel/sdistのcritical artifactとして確認する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format uv_packsize/dependency_paths.py tests/test_dependency_paths.py`、`ruff check`、`ty check`、`pytest tests/test_dependency_paths.py` — 成功（11 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 369 passed, 1 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make verify-build` — wheel/sdistへの新module含有、artifact metadata、installed entry pointを検証して成功。
+
+引き継ぎ:
+
+- 次のタスクはP3-02bとする。P3-02aのpure resultをopt-inの`--explain` text presentationへ接続する。schema v1 JSONおよびbyte attributionはこのtaskの対象外とする。
 
 ### 2026-07-31: P3-01b installed Core Metadata adapter
 
