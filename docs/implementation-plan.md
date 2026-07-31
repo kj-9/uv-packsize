@@ -9,8 +9,8 @@
 | 項目 | 状態 |
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
-| `in_progress` | なし |
-| 次のタスク | P3-05: 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する |
+| `in_progress` | P3-05: 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する |
+| 次のタスク | P3-05b: root contribution resultのpure text presentationを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -226,7 +226,9 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `done` |
 | P3-04c1 | Phase 3 | prefix CLI core/unit契約を接続する | `done` |
 | P3-04c2 | Phase 3 | prefix README契約とlocal end-to-end検証を接続する | `done` |
-| P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
+| P3-05a | Phase 3 | root set単位の純粋なnon-split byte aggregateを実装する | `done` |
+| P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `todo` |
+| P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
@@ -630,6 +632,47 @@ P2-06bの完了条件:
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
 
 P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とshared dependencyの非二重計上を表示・検証する。
+
+### P3-05: multiple-root contribution policyとpresentation
+
+目的:
+
+- canonical file inventoryを唯一のbyte sourceとして、複数rootへ到達する依存物を分割も二重計上もせずに説明可能にする。
+
+分割:
+
+- P3-05aは`ExplainedAnalysisResult`を入力に、exact root-set bucketとrootごとのclosure/exclusive/sharedをpure immutable resultとして導出する。
+- P3-05bはP3-05a resultのpure text presentationを実装する。CLI、README、JSON schemaは変更しない。
+- P3-05cはtext-only public CLI option、README、local wheel integrationを接続する。既存JSON schemaは互換境界として変更しない。
+
+不変条件:
+
+- canonical identityごとにlogical bytes、category、file countは一度だけ数える。各fileのroot setは、そのfileを所有する全distribution nodeの`root_names` unionで決める。
+- empty root set（unattributed bucket）は常に存在し、recognized root名ごとのsingleton bucketは観測fileがなくても存在する。observed shared root setも保持する。
+- graphがincompleteならroot set totalとroot contributionは利用不能を明示して提供しない。ただしfootprintのinventory-derived category totalと測定済みのpartial bytesは保持する。
+- duplicate root inputはroot input indexを保持するがbyte bucketを増やさない。rootでもあるdependency、cycle、duplicate file ownershipはdistribution nodeのroot-name unionを用いる。
+
+### 2026-07-31: P3-05a pure root contribution aggregation
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/root_contributions.py`](../uv_packsize/root_contributions.py)に、全6 categoryを固定順で持つ`RootSetTotal`と`RootScopedTotal`、rootごとの`closure`/`exclusive`/`shared`を持つ`RootContribution`、およびsource `ExplainedAnalysisResult`と同一sourceの`FootprintResult`を保持する`RootContributionResult`を追加した。
+- exact root-setはcanonical identityごとに一度だけ集計し、そのidentityを所有する全distributionのgraph `root_names`をunionする。shared bytesはroot間に割り振らず、各rootのclosureでは参照するだけにする。
+- graph incomplete時はroot-set/root contributionを`None`にし、footprint category totalとinventory completenessを維持する。aggregate constructorはsourceから再計算し、順序、欠損、改ざん済み値を拒否する。
+- [`tests/test_root_contributions.py`](../tests/test_root_contributions.py)でempty/zero category、2 root shared、duplicate root input、rootかつdependency/cycle、duplicate ownership union/unattributed、graph/inventory incomplete、determinism/immutability/forged aggregateをnetwork不要で検証した。artifact verifierに新moduleを追加した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_root_contributions.py -q` — 成功（9 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（518 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-05bとする。P3-05a resultをpure text presentationへ接続し、既存report、CLI、README、JSON schemaを変更しない。
 
 ## 作業記録
 
