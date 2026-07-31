@@ -394,6 +394,71 @@ def test_real_uv_local_wheel_baseline_compare_is_read_only_and_stdout_only(tmp_p
     assert baseline.read_bytes() == before
 
 
+def test_real_uv_local_wheel_comparison_json_is_complete_and_read_only(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    baseline = tmp_path / "baseline.json"
+    recorded = _run_cli(tmp_path, wheelhouse, "--json")
+    assert recorded.returncode == 0
+    baseline.write_text(recorded.stdout)
+    before = baseline.read_bytes()
+
+    completed = _run_cli(
+        tmp_path, wheelhouse, "--baseline", str(baseline), "--comparison-json"
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.endswith("\n")
+    assert not completed.stdout.endswith("\n\n")
+    document = json.loads(completed.stdout)
+    assert list(document) == [
+        "schema_version",
+        "measurement",
+        "context",
+        "baseline",
+        "current",
+        "changes",
+        "completeness",
+    ]
+    assert document["schema_version"] == 1
+    assert document["context"] == {
+        "input_kind": "fresh-install",
+        "comparison_context_fingerprint": document["context"][
+            "comparison_context_fingerprint"
+        ],
+    }
+    assert re.fullmatch(
+        r"[0-9a-f]{64}", document["context"]["comparison_context_fingerprint"]
+    )
+    assert document["baseline"]["totals"] == document["current"]["totals"]
+    assert document["changes"]["totals"] == {
+        "global_logical_bytes_delta": 0,
+        "distribution_logical_bytes_delta": 0,
+    }
+    distributions = document["changes"]["distributions"]
+    assert [item["name"] for item in distributions] == sorted(
+        (_ROOT_A, _ROOT_B, _SHARED)
+    )
+    assert all(item["kind"] == "unchanged" for item in distributions)
+    assert all(item["baseline"] == item["current"] for item in distributions)
+    assert all(item["logical_bytes_delta"] == 0 for item in distributions)
+    nonreconciliation = document["changes"]["nonreconciliation"]
+    assert nonreconciliation == {
+        "present": False,
+        "distribution_minus_global_logical_bytes_delta": 0,
+        "reason": None,
+    }
+    assert document["completeness"] == "complete"
+    assert completed.stderr == (
+        "Calculating size for 2 requested packages...\n"
+        "Creating virtual environment...\n"
+        "Installing 2 requested packages and their dependencies...\n"
+        "Analyzing sizes...\n"
+        "Comparing with baseline...\n"
+    )
+    assert baseline.read_bytes() == before
+
+
 def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
     tmp_path,
 ):

@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-03b: `--comparison-json` CLI/public contractを接続する |
+| 次のタスク | P4-03c: fresh baselineのpure render/atomic writerを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-03b: `--comparison-json` CLI/public contract |
+| 次の成果物 | P4-03c: fresh baselineのpure render/atomic writer |
 
 ## ステータス定義
 
@@ -236,7 +236,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `done` |
 | P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `done` |
 | P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `done` |
-| P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `todo` |
+| P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `done` |
 | P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `todo` |
 | P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `todo` |
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `todo` |
@@ -885,6 +885,33 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P4-03aとする。pure serializerだけを先に固定し、CLI、filesystem書込み、公開READMEを触らないlow-riskな完了単位とする。
 
 ## 作業記録
+
+### 2026-07-31: P4-03b `--comparison-json` CLI/public contract
+
+状態: `done`
+
+実装:
+
+- `--comparison-json`を`--baseline PATH`必須のcomparison output selectorとしてCLIへ接続した。baseline未指定、baselineとの既存排他、shared fresh-input usageはbaseline read、uv検出、temporary environment作成より前にusage errorとなる。既存text comparisonとfresh/existing-prefix analysis JSONの出力経路は変更していない。
+- comparison成功時は`AnalysisDiff`をanalysis JSONへのserialize/parseを経由させず、`render_comparison_json()`へ一度だけ直接渡し、JSON documentとrenderer由来の末尾LFだけをstdoutへ出す。progressはstderrのみとし、incomplete comparisonもJSONのcompleteness/warning summaryを保ったexit 0とする。
+- comparison JSON renderer失敗はraw payloadやtracebackを反射せず、fixed diagnosticのexit 1/stdout空へ正規化した。baseline load/parseはexit 3、incompatible comparisonはexit 4、usageはexit 2の既存boundaryを維持した。
+- READMEにschema v1 link、closed compatibility boundary、analysis-result JSONとの別契約、opaque context fingerprint、global/distribution aggregate・nonreconciliation・completeness、read-only baseline、success-only stdoutとexit 0--4を記載した。
+
+テスト:
+
+- unitでhelp、baseline必須guard、direct diff renderer一回、analysis JSON roundtrip非使用、progress/stdout分離、incomplete success、renderer TypeError/ValueErrorのsafe exit 1、selector指定時のbaseline load exit 3・incompatible exit 4・current operational exit 1を検証した。既存baseline text/fresh JSON/prefix JSON compatibility testも維持した。
+- network-free local wheel E2Eで既存baseline fileとのcomparison JSONをparseし、top-level順序、schema/context hash、aggregate totals、full unchanged distribution rows、nonreconciliation/completeness、stderr progress、baseline bytes不変を検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py -q` — 106 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 666 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P4-03cでfresh baselineのpure render/atomic writerを実装する。
 
 ### 2026-07-31: P4-03a pure comparison JSON schema/renderer
 

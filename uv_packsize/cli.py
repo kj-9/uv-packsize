@@ -17,6 +17,7 @@ from uv_packsize.baseline import (
     analysis_result_to_baseline,
     load_baseline,
 )
+from uv_packsize.comparison_json_render import render_comparison_json
 from uv_packsize.dependency_paths import explain_dependency_paths
 from uv_packsize.diff import IncompatibleComparisonError, compare_baselines
 from uv_packsize.diff_render import render_diff_report
@@ -286,6 +287,11 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Write the versioned analysis result as JSON to stdout.",
 )
 @click.option(
+    "--comparison-json",
+    is_flag=True,
+    help="Write the versioned baseline comparison result as JSON to stdout.",
+)
+@click.option(
     "--explain",
     is_flag=True,
     help="Text output only: show installed-metadata dependency paths and attribution.",
@@ -314,6 +320,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     case_rule,
     bin,
     json_output,
+    comparison_json,
     explain,
     breakdown,
     contributions,
@@ -321,6 +328,9 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     python_version,
 ):
     """Report the size of a Python package and its dependencies using uv."""
+    if comparison_json and baseline is None:
+        raise click.UsageError("--comparison-json requires --baseline.")
+
     if baseline is not None:
         _validate_baseline_options(
             prefix=prefix,
@@ -439,7 +449,15 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 raise click.ClickException(
                     "Could not compare the analysis result."
                 ) from None
-            click.echo(render_diff_report(diff))
+            if comparison_json:
+                try:
+                    click.echo(render_comparison_json(diff), nl=False)
+                except (TypeError, ValueError):
+                    raise click.ClickException(
+                        "Could not render comparison JSON."
+                    ) from None
+            else:
+                click.echo(render_diff_report(diff))
             return
 
         # JSON v1 remains a strict compatibility boundary.  In particular, do

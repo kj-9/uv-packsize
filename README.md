@@ -57,6 +57,8 @@ Options:
                                   disabled by default.
   --json                          Write the versioned analysis result as JSON to
                                   stdout.
+  --comparison-json               Write the versioned baseline comparison result
+                                  as JSON to stdout.
   --explain                       Text output only: show installed-metadata
                                   dependency paths and attribution.
   --breakdown                     Text output only: show global file-category
@@ -197,14 +199,25 @@ fresh measurement to that read-only file:
 ```bash
 uv-packsize requests==2.32.5 --json > baseline.json
 uv-packsize requests==2.32.5 --baseline baseline.json
+uv-packsize requests==2.32.5 --baseline baseline.json --comparison-json
 ```
 
-Comparison writes only the text diff report to standard output; progress and
-errors go to standard error. The baseline file is never modified. The two
-measurements must use the same measurement definition and resolution context
-(including requirements, Python/platform fingerprints, build policy, and
-resolver conditions). Existing-prefix schema v2 baselines are deliberately not
-comparable yet.
+The default comparison writes only the text diff report to standard output.
+`--comparison-json` instead writes one successful, versioned JSON document
+conforming to the committed [comparison result schema v1](./schemas/comparison-result-v1.schema.json),
+including its final newline. It is a closed `comparison-result-v1` contract;
+consumers must check `schema_version` before interpreting it. This comparison
+document is separate from analysis-result JSON v1/v2: it reports the baseline
+and current global/distribution aggregates, every distribution change,
+nonreconciliation, and completeness rather than a file inventory.
+
+Comparison JSON exposes an opaque context fingerprint for correlation, not raw
+requirements, paths, resolver observations, or the individual context
+fingerprints. The two measurements must use the same measurement definition
+and resolution context (including requirements, Python/platform fingerprints,
+build policy, and resolver conditions). Existing-prefix schema v2 baselines
+are deliberately not comparable yet. The baseline file is read once and never
+modified.
 
 The report shows both the deduplicated global logical-size change and the
 distribution-owned aggregate change. They can differ when multiple
@@ -212,12 +225,16 @@ distributions own the same installed file: global totals count each canonical
 file once, while distribution totals retain ownership. Incomplete but
 comparable inputs still exit successfully and label their deltas as partial.
 
-Comparison does not offer JSON output yet, so `--baseline` is mutually
-exclusive with `--json`, `--prefix`, `--bin`, `--explain`, `--breakdown`, and
-`--contributions`. A completed comparison (including an incomplete one) exits
-0; regular install or analysis failures exit 1; invalid usage exits 2;
-baseline load or validation failures exit 3; and incompatible baselines exit
-4.
+`--comparison-json` requires `--baseline` and is mutually exclusive with
+`--json`; the existing `--baseline` exclusions for `--prefix`, `--bin`,
+`--explain`, `--breakdown`, and `--contributions` also apply. Progress and
+sanitized errors go to standard error. Both comparison forms exit 0 on a
+completed comparison, including an incomplete comparison whose JSON
+`completeness` and warning summaries describe the partial result. Regular
+install or analysis failures exit 1; invalid usage exits 2; baseline load or
+validation failures exit 3; and incompatible baselines exit 4. Every failure
+leaves standard output empty, so comparison JSON can be consumed safely only
+on success.
 
 ### Dependency explanations
 
