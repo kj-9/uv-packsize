@@ -17,6 +17,7 @@ SDIST_ROOT = f"uv_packsize-{EXPECTED_VERSION}"
 CRITICAL_MODULES = {
     "uv_packsize/__init__.py",
     "uv_packsize/__main__.py",
+    "uv_packsize/baseline.py",
     "uv_packsize/cli.py",
     "uv_packsize/dependency_graph.py",
     "uv_packsize/dependency_paths.py",

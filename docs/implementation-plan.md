@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 3: サイズの理由を説明する（`done`） |
+| 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-01a: baseline JSON/diff policyの契約とmodelを設計する |
+| 次のタスク | P4-01b: pure diff modelを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-01a: baseline JSON/diff policyの契約とmodel |
+| 次の成果物 | P4-01b: pure diff model |
 
 ## ステータス定義
 
@@ -229,8 +229,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-05a | Phase 3 | root set単位の純粋なnon-split byte aggregateを実装する | `done` |
 | P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `done` |
 | P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `done` |
-| P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `todo` |
-| P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
+| P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `done` |
+| P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -717,6 +717,33 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - Phase 3は完了。次のタスク候補はP4-01aとし、baseline JSONとdiff policyの互換契約、入力model、schema version境界を先に固定してからP4-01の比較・budget policyへ進む。
+
+### 2026-07-31: P4-01a baseline JSON contract/model
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/baseline.py`に、既存の公開JSON schema v1/v2だけを受理するpure decoderと、比較用のfrozen projection modelを追加した。CLI、既存serializer、schema、READMEの公開契約は変更していない。
+- projectionはschema version/input kind、固定measurement contract、`totals.global_logical_bytes`、normalized distribution name/version/logical bytes、completeness/warning code count、duplicate ownershipの有無/件数、v1の安全なresolution comparison contextを保持する。raw requirement、file path、symlink target、baseline file path、credentialはmodelに保持しない。v2は`existing-prefix`を明示し、resolver provenanceの空/nullを補完しない。
+- decoderはschema version/context family、全objectのclosed shape、measurement constants、nonnegative non-bool bytes、path/name/type、v1 requirement projection、v2 empty/null field、normalized distribution collisionを検査する。distribution/file/global totals、duplicate ownership relation、warning由来のcompletenessもcanonical inventoryと照合する。distribution totalsの合計とglobal totalの一致は要求せず、duplicate ownershipによる差を許容する。
+- `parse_baseline_json()`はstr/bytes/bytearrayのpure境界、`load_baseline(Path)`はread-only file境界として分離した。I/O/parse diagnosticsは固定code/fieldだけで、raw content/path/OS causeを反射しない。load前8 MiB、decoded JSONの64 nesting、100,000 item、1,000,000 char string、signed 64-bit nonnegative integerの上限を設け、比較入力として過度なresource消費を避ける。
+- レビュー後、JSON parserの全object階層でduplicate keyを固定診断により拒否し、bytesはBOMなしUTF-8だけを受理するよう明確化した。`load_baseline()`はsymlink/special fileを拒否し、同一nonblocking descriptorの`fstat`確認後に最大8 MiB+1 byteだけを読んでTOCTOU/無制限read/FIFO blockingを避ける。`O_NOFOLLOW`が利用可能なplatformでは併用する。
+- canonical identityが複数distributionに現れる場合はlogical bytes、category、symlink flagを一致検証し、duplicate ownership relationとroot-level `duplicate-ownership` warningを対象identityまで相互導出する。distribution-levelの同warningは拒否する。v1 requirement projectionとbuild policyも既存serializerが生成可能な組合せだけを比較modelへ残す。
+- v1 comparison contextのfree-form Python/platform/architecture/uv version/resolution strategyは、validation後にfield名をdomain-separatedしたSHA-256 fingerprintだけへ投影する。比較modelのdataclass/reprには元文字列を残さず、1文字差もcomparison equalityへ反映する。requirements、enum、bool、extras、index aliasのsafe structured fieldは保持する。URL/credential専用field、raw requirement、raw path、symlink targetは引き続き保持しない。
+- v2 existing-prefixのnullable Python/platform/architectureも同様に扱い、`None`はそのまま保持し、schemaのsafe observationを通過した非`None`値だけをdomain-separated fingerprintへ投影する。したがってprivate tokenや表示制御文字を含む観測値もcomparison modelのfield/reprには残さない。
+- v1/v2 golden acceptance、順序不変/frozen model、closed-shape/type/context mismatch、duplicate JSON key、UTF-8/BOM、孤立surrogate、5000桁integer、total/ownership/file signature/warning target semantic mismatch、free-form context fingerprint、sanitized diagnostics、symlink/FIFO/open後inode変更を含むfile I/O境界をnetwork不要で検証した。artifact verifierにも新moduleを追加した。
+
+検証:
+
+- `uv run --locked pytest tests/test_baseline.py tests/test_json_render.py -q` — 成功（84 passed）。
+- `make ci-check` — 成功。
+- `make test` — 成功（569 passed, 2 skipped）。
+- `uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP4-01bとする。baseline projectionを入力に、比較可否判定とdistribution/global diffをpure immutable modelとして実装する。CLI、budget policy、baseline書込みはまだ接続しない。
 
 ## 作業記録
 
