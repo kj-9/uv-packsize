@@ -207,6 +207,7 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "packaging" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.dev-dependencies]
@@ -221,6 +222,7 @@ dev = [
 requires-dist = [
     { name = "click" },
     { name = "packaging" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.metadata.requires-dev]

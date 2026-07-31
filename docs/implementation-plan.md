@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-04d: pyproject policy source resolution/file I/O contractを設計・実装する |
+| 次のタスク | P4-04e: CLI policy input/precedence contractを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-04d: pyproject policy source resolution/file I/O boundary |
+| 次の成果物 | P4-04e: CLI policy input/precedence design |
 
 ## ステータス定義
 
@@ -242,7 +242,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `done` |
 | P4-04b | Phase 4 | budget text/result presentation contractをpureに設計・実装する | `done` |
 | P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `done` |
-| P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `todo` |
+| P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `done` |
+| P4-04e | Phase 4 | CLI policy input/precedence contractを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -879,7 +880,8 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-04a | `done` | P4-03a, P4-03d | `uv_packsize/budget.py`（新規）、`tests/test_budget.py`（新規）、`scripts/verify_build.py` | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで実装した。 |
 | P4-04b | `done` | P4-04a | `uv_packsize/budget_render.py`（新規）、`tests/test_budget_render.py`（新規）、`scripts/verify_build.py` | exactな`BudgetEvaluation`だけを再検証して受けるsafeかつdeterministicなtext presentationを実装した。canonical global authority、configured metric、no-op、completeness policy、fixed violation orderをpureに表示し、CLI/config/JSON schema/exit codeは変更しない。 |
 | P4-04c | `done` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`scripts/verify_build.py`、`docs/implementation-plan.md` | exact built-in `dict`だけをtrusted policy mappingとして受ける`parse_budget_policy()`を実装した。closed snake_case keys、missing field/default no-op、exact nonbool integer range、exact incomplete-policy string、unknown/type/range/incomplete-policy/internal-inputのfixed taxonomyとpriority、safe enum field/path付きsanitized typed errorをunit testで固定した。CLI、`pyproject.toml` I/O、exit code、CIは未接続。 |
-| P4-04d | `todo` | P4-04c | `uv_packsize/budget_config_source.py`（新規候補）、`tests/test_budget_config_source.py`（新規候補）、`docs/implementation-plan.md`、必要なら`docs/roadmap.md` | `pyproject.toml`からpolicy sectionを選ぶsource-resolution/file I/O境界を設計・実装し、P4-04cのpure parserへ渡すtrusted builtin mappingだけを生成する。source precedence、missing section/file、TOML parse/read failure、sanitized diagnosticsを固定する。CLI option、budget exit code、README、CI workflowは接続しない。 |
+| P4-04d | `done` | P4-04c | `uv_packsize/budget_config_source.py`、`tests/test_budget_config_source.py`、`tests/test_verify_build.py`、`pyproject.toml`、`uv.lock`、`scripts/verify_build.py`、`docs/implementation-plan.md` | explicit native `Path`だけを受ける`load_budget_policy()`を実装した。`[tool.uv-packsize.budget]`不在は`None`、明示空tableはno-op policyとし、nonblocking bounded regular-file read、open前後identity照合、TOML/section/source errorのsanitized typed taxonomyを固定した。Python 3.10ではconditional runtime `tomli`、3.11+ではstdlib `tomllib`を使い、artifact metadataのmarkerを厳密に検証する。CLI option、budget exit code、README、CI workflowは未接続。 |
+| P4-04e | `todo` | P4-04d | `docs/implementation-plan.md`（設計）、必要に応じて`uv_packsize/cli.py`、`README.md`、test | CLIへbudget policy sourceを接続する前に、explicit config optionの名称、cwd/upward discoveryの有無、CLI flagsとのprecedence、section不在/no-op/file failureのexit・stderr・stdout契約、compare要否、既存CLI不変性を設計として固定する。P4-04dのsource adapterが行う読み込み以外のsource探索・mergeは追加しない。 |
 
 検証:
 
@@ -888,9 +890,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P4-04dとする。`pyproject.toml` policy source resolution/file I/OをP4-04cのpure parserへ接続する境界だけを固定し、CLI option、budget exit code、README、CI exampleは別タスクに残す。
+- P4-04eとする。CLIへpolicy sourceを接続する前に、option/source precedence、未設定・不完全測定・failure時のexit/stdout/stderr契約を設計として固定する。CI exampleは別タスクに残す。
 
 ## 作業記録
+
+### 2026-07-31: P4-04d pyproject budget policy source
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/budget_config_source.py`に、explicit native `Path`だけを受ける`load_budget_policy()`を追加した。cwd/upward discovery、環境変数、複数sourceのmergeは行わない。`[tool.uv-packsize.budget]`不在は`None`、明示空tableはP4-04c parserへ渡すexplicit no-op policyとした。
+- fileは1 MiBまでにbounded readする。通常のsymlink followを維持しつつ、`O_NONBLOCK`付きdescriptorを開いて`fstat`でregular fileを要求し、事前`stat`とのdevice/inode一致を確認してから`os.read`する。これによりregular fileからFIFO等への差し替えでblockせず、regular file同士の差し替えも`changed-file`として拒否する。missing/not-regular/changed/read/size/encoding/TOML/document/table/parser-unavailableを固定の`BudgetPolicySourceError` reasonとsafe sectionだけへ正規化し、path、TOML内容、parser/OS診断を反射しない。nested policy fieldの妥当性はP4-04cの`BudgetPolicyConfigError`をそのまま使う。
+- `requires-python >=3.10`を維持するため、3.11+ではstdlib `tomllib`、3.10ではconditional runtime dependency `tomli`を使う。`pyproject.toml`と`uv.lock`へこのconditional dependencyを記録し、artifact verifierへnew moduleを追加した。verifierはruntime dependencyをPEP 508として正規化し、`tomli; python_version < "3.11"`を含むexact multisetをwheel/sdist両方で要求するため、marker欠落・誤り・重複・余分な依存をrejectする。
+- 読み込み境界は同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新は防がない残余制約としてF-009へ記録した。CLI、budget exit code、README、CI workflowは変更していない。
+
+テスト:
+
+- configured/all-field、section不在、明示空table、non-table nesting、parserのunknown field、missing/directory/read/size、UTF-8/TOML failure、symlink target、FIFO/regular replacement race、exact Path、parser-unavailable、forged documentをnetwork-free `tmp_path` testで固定した。secret-like path/content/error textがtyped errorに出ないことを検証した。artifact verifierはnormalized markerの正常系と、marker欠落・誤り・重複・余分な依存の拒否をunit testで固定した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_budget_config.py tests/test_budget_config_source.py tests/test_verify_build.py -q` — 成功（38 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format --check uv_packsize/budget_config_source.py tests/test_budget_config_source.py scripts/verify_build.py tests/test_verify_build.py`、同filesへの`ruff check`、`uv run --locked ty check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（769 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。conditional runtime dependency、wheel/sdistへのnew module含有、artifact metadata、installed entry pointを検証した。
+
+次のタスク:
+
+- P4-04eでCLI policy input/precedence contractを設計する。P4-04dのexplicit source adapterを前提に、公開option、source precedence、exit/stdout/stderrを小さく固定してから実装へ接続する。
 
 ### 2026-07-31: P4-04c budget policy mapping normalization
 
@@ -2106,3 +2135,4 @@ uv run --locked python scripts/verify_build.py dist
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない | P6-01（上流連携） | `todo` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
+| F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04eまたはconfig source hardening | `todo` |

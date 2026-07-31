@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "click",
     "packaging",
+    "tomli; python_version < '3.11'",
 ]
 
 [build-system]

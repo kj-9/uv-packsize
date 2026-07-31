@@ -5,8 +5,12 @@ import subprocess
 import tarfile
 import tempfile
 import zipfile
+from collections import Counter
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 EXPECTED_NAME = "uv-packsize"
 EXPECTED_VERSION = "0.1.2"
@@ -20,6 +24,7 @@ CRITICAL_MODULES = {
     "uv_packsize/baseline.py",
     "uv_packsize/budget.py",
     "uv_packsize/budget_config.py",
+    "uv_packsize/budget_config_source.py",
     "uv_packsize/budget_render.py",
     "uv_packsize/baseline_write.py",
     "uv_packsize/comparison_json_render.py",
@@ -36,7 +41,25 @@ CRITICAL_MODULES = {
     "uv_packsize/root_contributions.py",
     "uv_packsize/root_contribution_render.py",
 }
-EXPECTED_RUNTIME_DEPENDENCIES = {"click", "packaging"}
+EXPECTED_RUNTIME_DEPENDENCIES = {
+    "click",
+    "packaging",
+    'tomli; python_version < "3.11"',
+}
+
+
+def _normalize_runtime_dependency(value):
+    try:
+        requirement = Requirement(value)
+    except InvalidRequirement as error:
+        raise ValueError("invalid Requires-Dist metadata") from error
+    return (
+        canonicalize_name(requirement.name),
+        tuple(sorted(requirement.extras)),
+        str(requirement.specifier),
+        requirement.url,
+        None if requirement.marker is None else str(requirement.marker),
+    )
 
 
 def _verify_metadata(data, artifact):
@@ -51,6 +74,18 @@ def _verify_metadata(data, artifact):
         raise ValueError(
             f"{artifact}: unexpected metadata: expected {expected}, got {actual}"
         )
+    expected_dependencies = Counter(
+        _normalize_runtime_dependency(value) for value in EXPECTED_RUNTIME_DEPENDENCIES
+    )
+    try:
+        actual_dependencies = Counter(
+            _normalize_runtime_dependency(value)
+            for value in metadata.get_all("Requires-Dist", [])
+        )
+    except ValueError as error:
+        raise ValueError(f"{artifact}: invalid Requires-Dist metadata") from error
+    if actual_dependencies != expected_dependencies:
+        raise ValueError(f"{artifact}: unexpected Requires-Dist metadata")
     return metadata
 
 
@@ -66,13 +101,7 @@ def _verify_wheel(path):
         for required_path in sorted(required_paths):
             if required_path not in names:
                 raise ValueError(f"{path}: missing {required_path}")
-        metadata = _verify_metadata(wheel.read(metadata_path), path)
-        requires_dist = set(metadata.get_all("Requires-Dist", []))
-        missing_dependencies = EXPECTED_RUNTIME_DEPENDENCIES - requires_dist
-        if missing_dependencies:
-            raise ValueError(
-                f"{path}: missing Requires-Dist: {sorted(missing_dependencies)}"
-            )
+        _verify_metadata(wheel.read(metadata_path), path)
         unexpected_schema_files = sorted(
             name for name in names if name.startswith("schemas/")
         )
