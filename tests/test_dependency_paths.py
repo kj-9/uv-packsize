@@ -32,6 +32,7 @@ from uv_packsize.models import (
     CaseRule,
     Completeness,
     DistributionResult,
+    ExistingPrefixContext,
     PathFlavor,
     ResolutionContext,
     WarningCode,
@@ -81,6 +82,21 @@ def analysis(
     )
 
 
+def existing_prefix_analysis(
+    installed: tuple[tuple[str, str], ...],
+) -> AnalysisResult:
+    return AnalysisResult(
+        context=ExistingPrefixContext(
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+        ),
+        distributions=tuple(
+            DistributionResult(name=name, version=version, files=())
+            for name, version in installed
+        ),
+    )
+
+
 def graph(
     result: AnalysisResult,
     *values: tuple[str, str, tuple[str, ...]],
@@ -99,6 +115,20 @@ def graph(
 
 def by_name(result: ExplainedAnalysisResult) -> dict[str, DistributionAttribution]:
     return {attribution.node.name: attribution for attribution in result.attributions}
+
+
+def test_explanations_reject_existing_prefix_context_without_reading_requirements():
+    prefix_result = existing_prefix_analysis((("root", "1"),))
+    resolution_result = analysis(("root",), (("root", "1"),))
+
+    with pytest.raises(
+        TypeError,
+        match="^dependency path explanations require a ResolutionContext$",
+    ):
+        explain_dependency_paths(
+            prefix_result,
+            graph(resolution_result, ("root", "1", ())),
+        )
 
 
 def test_cycle_paths_are_simple_shortest_and_canonical():

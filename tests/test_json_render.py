@@ -15,6 +15,7 @@ from uv_packsize.models import (
     BuildPolicy,
     CaseRule,
     DistributionResult,
+    ExistingPrefixContext,
     FileCategory,
     FileEntry,
     FileOrigin,
@@ -482,3 +483,18 @@ def test_committed_schema_is_closed_and_matches_the_v1_golden_shape():
 def test_json_renderer_requires_an_analysis_result():
     with pytest.raises(TypeError, match="AnalysisResult"):
         analysis_result_to_json_object(cast(Any, "not a result"))
+
+
+def test_schema_v1_explicitly_rejects_existing_prefix_context():
+    result = AnalysisResult(
+        context=ExistingPrefixContext(
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+        ),
+        distributions=(),
+    )
+
+    with pytest.raises(TypeError, match="schema v1 requires a ResolutionContext"):
+        analysis_result_to_json_object(result)
+    with pytest.raises(TypeError, match="schema v1 requires a ResolutionContext"):
+        render_analysis_json(result)

@@ -13,7 +13,11 @@ from enum import Enum
 
 from packaging.requirements import InvalidRequirement, Requirement
 
-from uv_packsize.models import AnalysisResult, normalize_distribution_name
+from uv_packsize.models import (
+    AnalysisResult,
+    ResolutionContext,
+    normalize_distribution_name,
+)
 
 _MARKER_VARIABLES = (
     "implementation_name",
@@ -436,13 +440,13 @@ def _metadata_states_by_name(
 
 
 def _root_requirements(
-    analysis: AnalysisResult,
+    context: ResolutionContext,
     installed_versions: Mapping[str, str],
     environment: MarkerEnvironment,
     warnings: set[DependencyGraphWarning],
 ) -> tuple[RootRequirement, ...]:
     roots: list[RootRequirement] = []
-    for index, value in enumerate(analysis.context.requirements):
+    for index, value in enumerate(context.requirements):
         requirement = _parse_requirement(value)
         if requirement is None:
             warnings.add(
@@ -733,6 +737,8 @@ def build_dependency_graph(
 
     if not isinstance(analysis, AnalysisResult):
         raise TypeError("analysis must be an AnalysisResult")
+    if not isinstance(analysis.context, ResolutionContext):
+        raise TypeError("dependency graph requires a ResolutionContext")
     if not isinstance(marker_environment, MarkerEnvironment):
         raise TypeError("marker_environment must be a MarkerEnvironment")
 
@@ -749,7 +755,7 @@ def build_dependency_graph(
     )
 
     roots = _root_requirements(
-        analysis, installed_versions, marker_environment, warnings
+        analysis.context, installed_versions, marker_environment, warnings
     )
     selected_extras: dict[str, set[str]] = {name: set() for name in installed_versions}
     for root in roots:

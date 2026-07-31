@@ -8,6 +8,7 @@ construct these values.
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import TypeAlias
 
 _NORMALIZED_NAME_SEPARATOR = re.compile(r"[-_.]+")
 _VALID_DISTRIBUTION_NAME = re.compile(r"^[A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*$")
@@ -22,6 +23,24 @@ def _require_non_empty(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must not have surrounding whitespace")
     if "\0" in value:
         raise ValueError(f"{field_name} must not contain NUL")
+
+
+def _require_safe_observation(value: str, field_name: str) -> None:
+    """Reject path-like values from non-reversible prefix observations.
+
+    Existing-prefix context fields are safe labels, not a transport for a
+    prefix, executable, site-packages location, or another local identifier.
+    Keep the diagnostic generic so an invalid supplied value is never echoed.
+    """
+
+    _require_non_empty(value, field_name)
+    if (
+        "/" in value
+        or "\\" in value
+        or value.startswith("~")
+        or _WINDOWS_DRIVE_PATH.match(value)
+    ):
+        raise ValueError(f"{field_name} must be a safe observed value")
 
 
 def _non_empty_tuple(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
@@ -344,6 +363,37 @@ class ResolutionContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ExistingPrefixContext:
+    """Observed, non-resolving context for an already-installed prefix.
+
+    Unlike :class:`ResolutionContext`, this intentionally makes no claim about
+    the requirements, resolver, index, build policy, or bytecode policy that
+    produced the prefix.  Optional observations are recorded only when a
+    prefix adapter can safely determine them.
+    """
+
+    path_flavor: PathFlavor
+    case_rule: CaseRule
+    python_version: str | None = None
+    platform: str | None = None
+    architecture: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path_flavor, PathFlavor):
+            raise TypeError("path_flavor must be a PathFlavor")
+        if not isinstance(self.case_rule, CaseRule):
+            raise TypeError("case_rule must be a CaseRule")
+        for field_name in ("python_version", "platform", "architecture"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            _require_safe_observation(value, field_name)
+
+
+AnalysisContext: TypeAlias = ResolutionContext | ExistingPrefixContext
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class FileEntry:
     """One included file, without distribution ownership information.
 
@@ -433,13 +483,15 @@ class DistributionResult:
 class AnalysisResult:
     """A complete analysis with totals derived from its file inventory."""
 
-    context: ResolutionContext
+    context: AnalysisContext
     distributions: tuple[DistributionResult, ...]
     warnings: tuple[AnalysisWarning, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.context, ResolutionContext):
-            raise TypeError("context must be a ResolutionContext")
+        if not isinstance(self.context, (ResolutionContext, ExistingPrefixContext)):
+            raise TypeError(
+                "context must be a ResolutionContext or ExistingPrefixContext"
+            )
 
         distributions = tuple(self.distributions)
         if any(

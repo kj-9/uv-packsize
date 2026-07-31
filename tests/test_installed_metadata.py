@@ -25,6 +25,7 @@ from uv_packsize.models import (
     BuildPolicy,
     CaseRule,
     DistributionResult,
+    ExistingPrefixContext,
     PathFlavor,
     ResolutionContext,
 )
@@ -68,10 +69,24 @@ def analysis(*names: str) -> AnalysisResult:
     )
 
 
+def existing_prefix_analysis(*names: str) -> AnalysisResult:
+    return AnalysisResult(
+        context=ExistingPrefixContext(
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+        ),
+        distributions=tuple(
+            DistributionResult(name=name, version="1", files=()) for name in names
+        ),
+    )
+
+
 def environment(
     result: AnalysisResult,
     *layouts: InventoryLayout,
 ) -> InstalledEnvironment:
+    if not isinstance(result.context, ResolutionContext):
+        raise TypeError("environment requires a ResolutionContext")
     return InstalledEnvironment(
         context=result.context,
         layouts=layouts,
@@ -418,6 +433,21 @@ def test_adapter_rejects_analysis_from_a_different_environment_context(tmp_path)
     assert error.value.code is InstalledMetadataAdapterErrorCode.CONTEXT_MISMATCH
     assert error.value.target == "installed-environment"
     assert str(error.value) == "context-mismatch: installed-environment"
+
+
+def test_adapter_rejects_existing_prefix_context_without_context_comparison(tmp_path):
+    inventory_layout = layout(tmp_path)
+    prefix_result = existing_prefix_analysis("root")
+    resolution_result = analysis("root")
+
+    with pytest.raises(
+        TypeError,
+        match="^installed dependency metadata requires a ResolutionContext$",
+    ):
+        build_installed_dependency_graph(
+            prefix_result,
+            environment(resolution_result, inventory_layout),
+        )
 
 
 def test_adapter_is_permutation_stable_and_does_not_mutate_analysis_or_leak_secrets(

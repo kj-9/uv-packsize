@@ -18,7 +18,12 @@ from uv_packsize.dependency_graph import (
     DependencyKind,
     RootRequirementStatus,
 )
-from uv_packsize.models import AnalysisResult, Completeness, normalize_distribution_name
+from uv_packsize.models import (
+    AnalysisResult,
+    Completeness,
+    ResolutionContext,
+    normalize_distribution_name,
+)
 
 
 def _input_indexes(values: tuple[int, ...]) -> tuple[int, ...]:
@@ -152,11 +157,11 @@ def _matching_graph_nodes(
 
 
 def _recognized_roots(
-    analysis: AnalysisResult,
+    context: ResolutionContext,
     graph: DependencyGraph,
     nodes: dict[str, DependencyGraphNode],
 ) -> tuple[tuple[int, str], ...]:
-    expected_indexes = tuple(range(len(analysis.context.requirements)))
+    expected_indexes = tuple(range(len(context.requirements)))
     if tuple(root.input_index for root in graph.roots) != expected_indexes:
         raise ValueError("dependency graph roots must match analysis input indexes")
     recognized = tuple(
@@ -170,7 +175,7 @@ def _recognized_roots(
     for input_index, name in named_roots:
         try:
             requirement_name = normalize_distribution_name(
-                Requirement(analysis.context.requirements[input_index]).name
+                Requirement(context.requirements[input_index]).name
             )
         except (InvalidRequirement, ValueError):
             raise ValueError(
@@ -238,11 +243,13 @@ def _validated_graph(
 
     if not isinstance(analysis, AnalysisResult):
         raise TypeError("analysis must be an AnalysisResult")
+    if not isinstance(analysis.context, ResolutionContext):
+        raise TypeError("dependency path explanations require a ResolutionContext")
     if not isinstance(graph, DependencyGraph):
         raise TypeError("graph must be a DependencyGraph")
 
     graph_nodes = _matching_graph_nodes(analysis, graph)
-    roots = _recognized_roots(analysis, graph, graph_nodes)
+    roots = _recognized_roots(analysis.context, graph, graph_nodes)
     adjacency = _adjacency(graph, graph_nodes)
     _validate_node_attribution(graph_nodes, adjacency, roots)
     return graph_nodes, adjacency

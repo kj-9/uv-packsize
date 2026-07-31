@@ -144,6 +144,8 @@ def analysis_result_to_json_object(result: AnalysisResult) -> dict[str, object]:
 
     if not isinstance(result, AnalysisResult):
         raise TypeError("result must be an AnalysisResult")
+    if not isinstance(result.context, ResolutionContext):
+        raise TypeError("schema v1 requires a ResolutionContext")
 
     distribution_total = sum(
         distribution.total_logical_bytes for distribution in result.distributions

@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-04: 既存virtual environmentまたはprefixを分析する入力modeを設計する |
+| 次のタスク | P3-04a2: existing-prefix用JSON schema v2を設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -221,7 +221,10 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-03a | Phase 3 | global dedupeを保つpure footprint aggregationを実装する | `done` |
 | P3-03b | Phase 3 | footprint resultのpure text presentationを実装する | `done` |
 | P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `done` |
-| P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
+| P3-04a1 | Phase 3 | existing-prefix context modelと既存schema v1互換境界を実装する | `done` |
+| P3-04a2 | Phase 3 | existing-prefix用JSON schema v2を設計・実装する | `todo` |
+| P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `todo` |
+| P3-04c | Phase 3 | prefix CLI/README契約とend-to-end検証を接続する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -570,7 +573,48 @@ P2-06bの完了条件:
 - role/categoryの各subtotalおよびglobal totalはfile inventoryから再計算して検証し、外部から供給された不整合なaggregateは拒否する。
 - rootでもあるdistributionは`self`であり、root別の容量寄与はP3-05まで主張しない。
 
+### P3-04: existing virtual environment / prefix input mode
+
+目的:
+
+- 既存のvirtual environmentまたはprefixを実行・変更せずにinventoryとして分析し、解決時の条件が不明な場合もその不確実性を捏造せずに結果へ表現する。
+
+分割:
+
+- P3-04a1はpure modelに`ExistingPrefixContext`を追加する。これはtargetのpath/case semanticsと安全に観測できたPython/platform/architectureだけを保持し、requirements、resolver、index、build、bytecodeの由来は表現しない。optional observationはpath-likeな値を拒否する。既存JSON schema v1は`ResolutionContext`専用の互換境界として明示的に拒否する。
+- P3-04a2は既存prefix contextを表現できるversioned JSON schema v2をpure serializerとして実装する。v1のbytesは変更しない。
+- P3-04bはprefix layoutと安全な観測contextをfilesystemから収集するread-only adapterを実装する。既存Pythonを実行せず、unknownは`None`として残す。
+- P3-04cはpublic CLI、README、local prefix integrationとerror contractを接続する。graph/explanationがrequirements由来の主張を必要とする場合のavailabilityは明示する。
+
+不変条件:
+
+- prefix inputはuser/CIの既存環境へinstall、uninstall、Python実行、metadata書換えを行わない。
+- observed contextはabsolute raw path、credential、requirements、index URLなどを結果modelまたはJSONへ保持しない。
+- `path_flavor`と`case_rule`はinventory layoutと常に一致し、不一致は収集前にtyped errorになる。
+- JSON schema v1と既存のresolution-based text/JSON出力はbyte-compatibleに維持する。existing prefix結果はv2以降の明示的schemaでだけ機械可読に表現する。
+
 ## 作業記録
+
+### 2026-07-31: P3-04a1 existing-prefix context model
+
+状態: `done`
+
+実装:
+
+- frozen/slotsの`ExistingPrefixContext`と`AnalysisContext` unionを追加した。既存prefix contextは`path_flavor`、`case_rule`、任意の観測済みPython version/platform/architectureだけを保持し、非`None`値はtrim済みの非空・NULなし文字列かつpath-likeではない安全なobservationとして検証する。absolute、drive-relative、relative、UNC、tildeおよびslash/backslashを含むraw path値は拒否し、エラーへ値を出力しない。
+- `AnalysisResult`と`analyze_installed_environment()`は両contextを受理し、inventory layoutとのpath flavor/case rule照合は既存のtyped error contractのまま維持した。
+- schema v1 serializerは`ResolutionContext`以外を明示的な`TypeError`で拒否するため、存在しないresolution属性への`AttributeError`に依存せず、既存golden JSONの形とbytesを変えない。
+- optional context validation、immutability、permutation/hash determinism、layout mismatch、resolution context regression、v1 rejectionのunit coverageを追加した。dependency graph/explanationとprefix discovery、schema v2、CLIは後続taskに分離した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_models.py tests/test_analysis.py tests/test_json_render.py -q` — 成功（148 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（443 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-04a2とする。existing-prefix contextを機械可読に表現するschema v2を、v1不変のまま実装する。
 
 ### 2026-07-31: P3-03c footprint presentation public CLI/README contract
 

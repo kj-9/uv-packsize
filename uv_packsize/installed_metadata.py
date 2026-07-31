@@ -27,7 +27,11 @@ from uv_packsize.inventory import (
     direct_dist_info_directories,
     validated_inventory_layouts,
 )
-from uv_packsize.models import AnalysisResult, normalize_distribution_name
+from uv_packsize.models import (
+    AnalysisResult,
+    ResolutionContext,
+    normalize_distribution_name,
+)
 
 _CORE_METADATA_VERSIONS = frozenset(
     {"1.0", "1.1", "1.2", "2.1", "2.2", "2.3", "2.4", "2.5"}
@@ -237,6 +241,8 @@ def build_installed_dependency_graph(
 
     if not isinstance(analysis, AnalysisResult):
         raise TypeError("analysis must be an AnalysisResult")
+    if not isinstance(analysis.context, ResolutionContext):
+        raise TypeError("installed dependency metadata requires a ResolutionContext")
     if not isinstance(environment, InstalledEnvironment):
         raise TypeError("environment must be an InstalledEnvironment")
     if analysis.context != environment.context:

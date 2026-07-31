@@ -25,6 +25,7 @@ from uv_packsize.inventory import (
 from uv_packsize.models import (
     BuildPolicy,
     Completeness,
+    ExistingPrefixContext,
     FileOrigin,
     ResolutionContext,
     WarningCode,
@@ -45,6 +46,15 @@ def context(**overrides: Any) -> ResolutionContext:
     }
     values.update(overrides)
     return ResolutionContext(**values)
+
+
+def existing_prefix_context(**overrides: Any) -> ExistingPrefixContext:
+    values: dict[str, Any] = {
+        "path_flavor": PathFlavor.POSIX,
+        "case_rule": CaseRule.SENSITIVE,
+    }
+    values.update(overrides)
+    return ExistingPrefixContext(**values)
 
 
 def layout(tmp_path: Path, python_version: str = "3.12") -> InventoryLayout:
@@ -120,6 +130,21 @@ def test_analysis_preserves_context_and_resolved_versions(tmp_path):
     assert [(item.name, item.version) for item in result.distributions] == [
         ("example-pkg", "2.4")
     ]
+
+
+def test_analysis_accepts_existing_prefix_context_without_resolution_claims(tmp_path):
+    inventory_layout = layout(tmp_path)
+    install_distribution(inventory_layout, name="example", version="1")
+    observed = existing_prefix_context(python_version="3.12.4")
+
+    result = analyze_installed_environment(
+        context=observed,
+        layouts=(inventory_layout,),
+    )
+
+    assert result.context is observed
+    assert result.context.python_version == "3.12.4"
+    assert not hasattr(result.context, "requirements")
 
 
 def test_analysis_is_deterministic_for_layout_and_supplemental_order(tmp_path):
@@ -262,6 +287,7 @@ def test_context_does_not_filter_observed_generated_files(tmp_path):
         layouts=(inventory_layout,),
     )
 
+    assert isinstance(result.context, ResolutionContext)
     assert result.context.compile_bytecode is False
     assert any(
         file.origin is FileOrigin.GENERATED for file in result.distributions[0].files
@@ -342,6 +368,37 @@ def test_context_layout_mismatch_is_typed_and_precedes_scan(
             context=resolution,
             layouts=(inventory_layout,),
         )
+
+    assert error.value.code is expected_code
+    assert error.value.target == "inventory-layout"
+
+
+@pytest.mark.parametrize(
+    ("observed", "expected_code"),
+    [
+        (
+            existing_prefix_context(path_flavor=PathFlavor.WINDOWS),
+            AnalysisContextErrorCode.PATH_FLAVOR_MISMATCH,
+        ),
+        (
+            existing_prefix_context(case_rule=CaseRule.INSENSITIVE),
+            AnalysisContextErrorCode.CASE_RULE_MISMATCH,
+        ),
+    ],
+)
+def test_existing_prefix_context_layout_mismatch_is_typed_and_precedes_scan(
+    tmp_path, monkeypatch, observed, expected_code
+):
+    inventory_layout = layout(tmp_path)
+
+    def unexpected_collection(*, layouts, supplemental):
+        del layouts, supplemental
+        raise AssertionError("filesystem inventory must not run")
+
+    monkeypatch.setattr(analysis_module, "collect_distributions", unexpected_collection)
+
+    with pytest.raises(AnalysisContextError) as error:
+        analyze_installed_environment(context=observed, layouts=(inventory_layout,))
 
     assert error.value.code is expected_code
     assert error.value.target == "inventory-layout"

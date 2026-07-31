@@ -11,6 +11,7 @@ from uv_packsize.models import (
     Completeness,
     DistributionResult,
     DuplicateOwnership,
+    ExistingPrefixContext,
     FileCategory,
     FileEntry,
     FileOrigin,
@@ -35,6 +36,15 @@ def context(**overrides: Any) -> ResolutionContext:
     }
     values.update(overrides)
     return ResolutionContext(**values)
+
+
+def existing_prefix_context(**overrides: Any) -> ExistingPrefixContext:
+    values: dict[str, Any] = {
+        "path_flavor": PathFlavor.POSIX,
+        "case_rule": CaseRule.SENSITIVE,
+    }
+    values.update(overrides)
+    return ExistingPrefixContext(**values)
 
 
 def file_entry(
@@ -71,6 +81,102 @@ def test_models_are_immutable_and_defensively_store_tuples():
     assert result.distributions == (distribution,)
     with pytest.raises(FrozenInstanceError):
         cast(Any, distribution).name = "changed"
+
+
+def test_existing_prefix_context_is_immutable_and_does_not_claim_resolution_inputs():
+    observed = existing_prefix_context(
+        python_version="3.12.4",
+        platform="linux",
+        architecture="x86_64",
+    )
+
+    assert observed.python_version == "3.12.4"
+    assert observed.platform == "linux"
+    assert observed.architecture == "x86_64"
+    assert not hasattr(observed, "requirements")
+    assert not hasattr(observed, "uv_version")
+    assert hash(observed)
+    with pytest.raises(FrozenInstanceError):
+        cast(Any, observed).platform = "changed"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "error"),
+    [
+        ("python_version", "", ValueError),
+        ("platform", " linux", ValueError),
+        ("architecture", "x86_64 ", ValueError),
+        ("python_version", "safe\0value", ValueError),
+        ("platform", cast(Any, 3), ValueError),
+        ("python_version", "/private/secret-prefix", ValueError),
+        ("platform", "C:\\Users\\secret", ValueError),
+        ("architecture", "C:secret", ValueError),
+        ("architecture", "\\\\server\\secret", ValueError),
+        ("python_version", "../secret", ValueError),
+        ("platform", "./secret", ValueError),
+        ("architecture", "~secret", ValueError),
+        ("python_version", "safe/value", ValueError),
+        ("platform", "safe\\value", ValueError),
+    ],
+)
+def test_existing_prefix_context_validates_optional_observations(
+    field_name, value, error
+):
+    with pytest.raises(error):
+        existing_prefix_context(**{field_name: value})
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("python_version", "3.12"),
+        ("platform", "linux"),
+        ("platform", "darwin"),
+        ("platform", "win32"),
+        ("architecture", "x86_64"),
+        ("architecture", "arm64"),
+        ("architecture", "AMD64"),
+    ],
+)
+def test_existing_prefix_context_accepts_safe_optional_observations(field_name, value):
+    observed = existing_prefix_context(**{field_name: value})
+
+    assert getattr(observed, field_name) == value
+
+
+@pytest.mark.parametrize("secret_path", ("/private/secret-prefix", "C:secret"))
+def test_existing_prefix_context_path_rejection_does_not_echo_the_value(secret_path):
+    with pytest.raises(ValueError) as error:
+        existing_prefix_context(platform=secret_path)
+
+    assert secret_path not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("path_flavor", cast(Any, "posix"), "PathFlavor"),
+        ("case_rule", cast(Any, "sensitive"), "CaseRule"),
+    ],
+)
+def test_existing_prefix_context_requires_path_and_case_enums(
+    field_name, value, message
+):
+    with pytest.raises(TypeError, match=message):
+        existing_prefix_context(**{field_name: value})
+
+
+def test_analysis_accepts_existing_prefix_context_and_remains_deterministic():
+    first = DistributionResult(name="z-dist", version="1", files=())
+    second = DistributionResult(name="a-dist", version="1", files=())
+    observed = existing_prefix_context()
+
+    forward = AnalysisResult(context=observed, distributions=(first, second))
+    reverse = AnalysisResult(context=observed, distributions=(second, first))
+
+    assert forward == reverse
+    assert hash(forward) == hash(reverse)
+    assert forward.context is observed
 
 
 def test_distribution_total_is_derived_from_deterministically_ordered_files():

@@ -18,6 +18,7 @@ from uv_packsize.models import (
     BuildPolicy,
     CaseRule,
     DistributionResult,
+    ExistingPrefixContext,
     PathFlavor,
     ResolutionContext,
     normalize_distribution_name,
@@ -68,6 +69,21 @@ def analysis(
     )
 
 
+def existing_prefix_analysis(
+    installed: tuple[tuple[str, str], ...],
+) -> AnalysisResult:
+    return AnalysisResult(
+        context=ExistingPrefixContext(
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+        ),
+        distributions=tuple(
+            DistributionResult(name=name, version=version, files=())
+            for name, version in installed
+        ),
+    )
+
+
 def metadata(
     *values: tuple[str, str, tuple[str, ...]],
 ) -> tuple[InstalledDistributionMetadata, ...]:
@@ -85,6 +101,15 @@ def test_normalize_distribution_name_is_public_and_shared_by_graph_models():
         InstalledDistributionMetadata(name="Example_Pkg", version="1").name
         == "example-pkg"
     )
+
+
+def test_graph_rejects_existing_prefix_context_without_reading_resolution_fields():
+    result = existing_prefix_analysis((("root", "1"),))
+
+    with pytest.raises(
+        TypeError, match="^dependency graph requires a ResolutionContext$"
+    ):
+        build_dependency_graph(result, (), environment())
 
 
 def test_graph_is_deterministic_and_classifies_direct_transitive_shared_and_unattributed():

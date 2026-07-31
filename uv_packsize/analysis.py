@@ -1,9 +1,9 @@
 """Orchestration boundary for analyzing an installed environment.
 
-The caller is responsible for supplying a ``ResolutionContext`` that accurately
+The caller is responsible for supplying an ``AnalysisContext`` that accurately
 describes the already-installed environment. Inventory remains authoritative for
-which files exist: context fields such as ``compile_bytecode`` are recorded for
-comparison and do not filter observed files.
+which files exist: resolution context fields such as ``compile_bytecode`` are
+recorded for comparison and do not filter observed files.
 """
 
 from collections.abc import Iterable
@@ -14,7 +14,7 @@ from uv_packsize.inventory import (
     SupplementalOwnership,
     collect_distributions,
 )
-from uv_packsize.models import AnalysisResult, ResolutionContext
+from uv_packsize.models import AnalysisContext, AnalysisResult
 
 
 class AnalysisContextErrorCode(str, Enum):
@@ -31,7 +31,7 @@ class AnalysisContextError(ValueError):
 
 def analyze_installed_environment(
     *,
-    context: ResolutionContext,
+    context: AnalysisContext,
     layouts: Iterable[InventoryLayout],
     supplemental: Iterable[SupplementalOwnership] = (),
 ) -> AnalysisResult:
@@ -42,8 +42,8 @@ def analyze_installed_environment(
     subprocess execution, rendering, serialization, or network access.
     """
 
-    if not isinstance(context, ResolutionContext):
-        raise TypeError("context must be a ResolutionContext")
+    if not isinstance(context, AnalysisContext):
+        raise TypeError("context must be a ResolutionContext or ExistingPrefixContext")
     if isinstance(layouts, InventoryLayout):
         raise TypeError("layouts must be a collection of InventoryLayout values")
     try:
