@@ -21,6 +21,7 @@ CRITICAL_MODULES = {
     "uv_packsize/dependency_graph.py",
     "uv_packsize/dependency_paths.py",
     "uv_packsize/explanation.py",
+    "uv_packsize/footprint.py",
     "uv_packsize/installed_metadata.py",
 }
 EXPECTED_RUNTIME_DEPENDENCIES = {"click", "packaging"}

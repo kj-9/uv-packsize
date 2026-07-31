@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-03: self/transitive totalとfile category別内訳のpolicyを設計・実装する |
+| 次のタスク | P3-03b: footprint resultのpure text presentationを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | self/transitive totalとfile category別内訳のpolicy |
+| 次の成果物 | footprint resultのpure text presentation |
 
 ## ステータス定義
 
@@ -218,7 +218,9 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-02a | Phase 3 | dependency path/explanationのpure immutable resultを実装する | `done` |
 | P3-02b1 | Phase 3 | `--explain` のpure text presentationを実装する | `done` |
 | P3-02b2 | Phase 3 | `--explain` CLI/README契約を接続する | `done` |
-| P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
+| P3-03a | Phase 3 | global dedupeを保つpure footprint aggregationを実装する | `done` |
+| P3-03b | Phase 3 | footprint resultのpure text presentationを実装する | `todo` |
+| P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `todo` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -549,7 +551,49 @@ P2-06bの完了条件:
 
 - 次のタスクはP3-03とする。self/transitive totalとfile category別内訳のpolicyを、root別byte attributionとは分けて設計・実装する。
 
+### P3-03: global footprint policyとpresentation
+
+目的:
+
+- `AnalysisResult`のcanonical file inventoryを唯一のbyte sourceとして、global dedupeを崩さずfile categoryとdependency roleの内訳を説明可能にする。
+
+分割:
+
+- P3-03aは`ExplainedAnalysisResult`だけを入力に、全`FileCategory`（zero rowを含む）のglobal totalと、graph complete時だけ利用できるdependency role totalをpure immutable resultとして導出する。roleは`self`、`direct`、`transitive`、`unattributed`、複数owner roleが衝突した`mixed-ownership`とする。root別byte配賦は行わない。
+- P3-03bはP3-03a resultのpure text presentationを実装する。既存report/JSON schema v1/CLI契約は変更しない。
+- P3-03cはtext opt-in public contract、README、end-to-end coverageを接続する。JSON schema v1は互換境界として変更しない。
+
+不変条件:
+
+- `canonical_identity`ごとにlogical bytesは一度だけ数える。shared dependency、同名root input、duplicate ownershipはglobal totalを増やさない。
+- graphがincompleteならcategory totalは利用可能なままにし、role totalはavailabilityを明示して提供しない。inventoryとgraphのcompletenessは別々に保持する。
+- role/categoryの各subtotalおよびglobal totalはfile inventoryから再計算して検証し、外部から供給された不整合なaggregateは拒否する。
+- rootでもあるdistributionは`self`であり、root別の容量寄与はP3-05まで主張しない。
+
 ## 作業記録
+
+### 2026-07-31: P3-03a global footprint aggregation
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/footprint.py`](../uv_packsize/footprint.py)に、`ExplainedAnalysisResult`だけを入力にするfrozen/slotsの`FootprintResult`を追加した。global category totalsはcanonical identityごとに一度だけ数え、固定された全`FileCategory`をzero rowを含めて保持する。
+- dependency graphがcompleteの場合だけ、`self`、`direct`、`transitive`、`unattributed`、`mixed-ownership`のrole totalsとrole内category totalsを導出する。複数ownerが同一roleなら一度だけそのroleへ、異なるroleなら一度だけ`mixed-ownership`へ分類する。rootでもあるdistributionは`self`とする。
+- graphがincompleteならinventory由来category totalsは維持し、role totalsは`None`として利用不能を明示する。inventory/graph/combined completenessは説明resultから別々に委譲する。
+- aggregate modelは、全category/role、subtotal、source inventoryへの再計算一致を検証するため、外部から供給された欠損・重複・改ざん済みtotalを受理しない。root別byte配賦、既存text/CLI/README/JSON schema v1は変更していない。
+- [`tests/test_footprint.py`](../tests/test_footprint.py)で、6 category/zero row/empty、rootかつdependency、shared dependencyと同名root input、duplicate ownershipのdedupe/mixed、role-category matrix、graph incomplete gate、permutation/frozen/forged aggregateをnetwork不要で検証し、artifact verifierへnew moduleを追加した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_footprint.py -q` — 成功（10 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format --check uv_packsize/footprint.py tests/test_footprint.py`、`uv run --locked ruff check uv_packsize/footprint.py tests/test_footprint.py`、`uv run --locked ty check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（392 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointに`footprint.py`を含むことを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-03bとする。P3-03aのimmutable resultをpure text presentationへ接続し、既存report、CLI、README、JSON schema v1は変更しない。
 
 ### 2026-07-31: P3-02a dependency path/explanation pure result
 
