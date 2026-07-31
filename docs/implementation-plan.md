@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-01b: pure diff modelを実装する |
+| 次のタスク | P4-02a: diff text renderer（CLI未接続）を実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-01b: pure diff model |
+| 次の成果物 | P4-02a: diff text renderer（CLI未接続） |
 
 ## ステータス定義
 
@@ -230,7 +230,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `done` |
 | P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `done` |
 | P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `done` |
-| P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `todo` |
+| P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `done` |
+| P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -744,6 +745,30 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP4-01bとする。baseline projectionを入力に、比較可否判定とdistribution/global diffをpure immutable modelとして実装する。CLI、budget policy、baseline書込みはまだ接続しない。
+
+### 2026-07-31: P4-01b baseline pure diff model
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/diff.py`に、frozen/slots/kw-onlyの`DistributionDelta`、`AnalysisDiff`、typed change/incompatibility enumと`compare_baselines()`を追加した。distributionはnormalized nameでname昇順full outer joinし、added/removed/version-changed/unchangedをprojectionから検証する。bytesは左右projectionから導出し、欠側を0として符号付きdeltaを保持する。
+- 比較はschema v1 fresh-install同士だけを許可し、measurement全fieldとresolution comparison context全field（input order、fingerprint、enum/bool、extras、index aliasを含む）の一致を要求する。schema v2を含む比較はresolver provenanceがないため`unsupported-existing-prefix`で拒否する。未知schema、measurement/context mismatchにはtyped reasonを返し、診断はraw baseline値を反射しない。
+- global deltaは常に左右のglobal totalから導出し、distribution aggregateとは別に保持する。duplicate ownershipでは両者が一致しないことを許容する。不完全baselineはrejectせずpartial deltaと左右/aggregate completenessへ投影し、budget policyの判断は後続taskへ残す。
+- forged modelのbool/negative total、非canonical/重複distribution、wrong delta kind/total/completeness、unsupported contextを拒否するvalidationを追加した。既存JSON serializer、CLI、README、baseline parserは変更していない。artifact verifierは`diff.py`を必須moduleとして確認する。
+- レビュー後、direct forged baselineにもdecoderと同等のwarning code/件数順序/complete判定、duplicate ownership summary、measurement constants、schema/context family、v1 requirement projection、fingerprint形式、path/case/build policy、bytes上限を再検証する境界を追加した。`AnalysisDiff`と`DistributionDelta`のreprはnested baselineやdistribution projectionを表示せず、count、status、aggregate bytesだけを表示する。
+- 最終レビュー後、`AnalysisDiff`のglobal/distribution signed deltaをboolではない`int`かつ`-MAX_BASELINE_INTEGER..MAX_BASELINE_INTEGER`へ制限し、左右およびaggregate completenessもplain stringを許さないexactな`Completeness` enumとして、導出値との照合前に検証するよう明確化した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_diff.py tests/test_baseline.py -q` — 成功（58 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（592 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP4-02aとする。`AnalysisDiff`のpure text rendererを追加し、CLI、JSON schema、baseline file I/O、budget policyには接続しない。
 
 ## 作業記録
 
