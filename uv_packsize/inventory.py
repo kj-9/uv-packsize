@@ -1024,9 +1024,14 @@ def _layout_prefix_identity(layout: InventoryLayout) -> str:
     return _key(value, layout.case_rule)
 
 
-def _validated_layouts(
+def validated_inventory_layouts(
     layouts: tuple[InventoryLayout, ...],
 ) -> tuple[InventoryLayout, ...]:
+    """Validate and deterministically order compatible inventory layouts.
+
+    This is shared by inventory consumers that need the same purelib/platlib
+    and duplicate-site semantics without collecting file ownership again.
+    """
     if isinstance(layouts, InventoryLayout) or not layouts:
         raise TypeError("layouts must be a non-empty tuple of InventoryLayout values")
     values = tuple(layouts)
@@ -1078,7 +1083,13 @@ def _validated_layouts(
     return tuple(sorted(values, key=_layout_site_identity))
 
 
-def _dist_info_directories(layout: InventoryLayout) -> tuple[Path, ...]:
+def direct_dist_info_directories(layout: InventoryLayout) -> tuple[Path, ...]:
+    """Return direct ``.dist-info`` children in deterministic lexical order.
+
+    The caller must inspect each returned entry with ``lstat`` before treating
+    it as a usable directory.  In particular, this helper intentionally does
+    not follow a symlink while deciding whether it is a dist-info candidate.
+    """
     try:
         children = tuple(layout.physical_site_packages.iterdir())
     except OSError as error:
@@ -1233,7 +1244,7 @@ def collect_distributions(
 ) -> tuple[DistributionResult, ...]:
     """Collect every direct-child dist-info across compatible layouts."""
 
-    layouts = _validated_layouts(layouts)
+    layouts = validated_inventory_layouts(layouts)
     if isinstance(supplemental, SupplementalOwnership):
         raise TypeError("supplemental must be a tuple of SupplementalOwnership values")
     supplemental = tuple(supplemental)
@@ -1246,7 +1257,7 @@ def collect_distributions(
     ] = {}
     distribution_owners: dict[str, tuple[str, Path]] = {}
     for layout in layouts:
-        for dist_info_dir in _dist_info_directories(layout):
+        for dist_info_dir in direct_dist_info_directories(layout):
             try:
                 result = collect_distribution(
                     layout=layout,

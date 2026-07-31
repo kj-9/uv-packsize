@@ -1,8 +1,11 @@
+import ast
 import json
 import os
 import subprocess
 import venv
+from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +19,20 @@ from uv_packsize.environment import (
     discover_installed_environment,
 )
 from uv_packsize.models import BuildPolicy, CaseRule, PathFlavor
+
+_MARKER_FIELDS = (
+    "implementation_name",
+    "implementation_version",
+    "os_name",
+    "platform_machine",
+    "platform_python_implementation",
+    "platform_release",
+    "platform_system",
+    "platform_version",
+    "python_full_version",
+    "python_version",
+    "sys_platform",
+)
 
 
 def probe_for(
@@ -31,10 +48,18 @@ def probe_for(
         prefix=str(prefix),
         base_prefix=str(prefix.parent / "base-python"),
         executable=str(prefix / "bin" / "python"),
-        python_version="3.14.0",
-        sysconfig_platform="test-platform",
-        machine="test-machine",
+        implementation_name="cpython",
+        implementation_version="3.14.0",
         os_name=os_name,
+        platform_machine="test-machine",
+        platform_python_implementation="CPython",
+        platform_release="test-release",
+        platform_system="TestOS",
+        platform_version="test-version",
+        python_full_version="3.14.0",
+        python_version="3.14",
+        sys_platform="test-platform",
+        sysconfig_platform="test-platform",
         purelib=str(purelib),
         platlib=str(platlib),
     )
@@ -73,6 +98,20 @@ def test_build_environment_preserves_caller_context_and_deduplicates_layout(tmp_
     assert environment.context.extras == ("speedups",)
     assert environment.context.index_identifiers == ("private-index",)
     assert environment.context.resolution_strategy == "lowest-direct"
+    assert environment.marker_environment.as_mapping(extra="") == {
+        "implementation_name": "cpython",
+        "implementation_version": "3.14.0",
+        "os_name": "posix",
+        "platform_machine": "test-machine",
+        "platform_python_implementation": "CPython",
+        "platform_release": "test-release",
+        "platform_system": "TestOS",
+        "platform_version": "test-version",
+        "python_full_version": "3.14.0",
+        "python_version": "3.14",
+        "sys_platform": "test-platform",
+        "extra": "",
+    }
     assert len(environment.layouts) == 1
     assert environment.layouts[0].physical_site_packages == purelib
     assert environment.layouts[0].path_flavor is PathFlavor.POSIX
@@ -95,10 +134,18 @@ def test_build_environment_supports_windows_logical_layout_on_posix(tmp_path):
         prefix=r"C:\work\venv",
         base_prefix=r"C:\Python314",
         executable=r"C:\work\venv\Scripts\python.exe",
-        python_version=probe.python_version,
-        sysconfig_platform="win-amd64",
-        machine="AMD64",
+        implementation_name=probe.implementation_name,
+        implementation_version=probe.implementation_version,
         os_name="nt",
+        platform_machine="AMD64",
+        platform_python_implementation=probe.platform_python_implementation,
+        platform_release=probe.platform_release,
+        platform_system="Windows",
+        platform_version=probe.platform_version,
+        python_full_version=probe.python_full_version,
+        python_version=probe.python_version,
+        sys_platform="win32",
+        sysconfig_platform="win-amd64",
         purelib=probe.purelib,
         platlib=probe.platlib,
     )
@@ -118,6 +165,9 @@ def test_build_environment_supports_windows_logical_layout_on_posix(tmp_path):
 
     assert environment.context.path_flavor is PathFlavor.WINDOWS
     assert environment.context.case_rule is CaseRule.INSENSITIVE
+    assert environment.marker_environment.os_name == "nt"
+    assert environment.marker_environment.platform_machine == "AMD64"
+    assert environment.marker_environment.sys_platform == "win32"
     assert [layout.logical_site_packages for layout in environment.layouts] == [
         r"C:\work\venv\Lib\site-packages",
         r"C:\work\venv\Lib\site-packages-native",
@@ -143,21 +193,7 @@ def test_discovery_probes_venv_python_once_and_each_site_directory(tmp_path):
         return subprocess.CompletedProcess(
             args=[str(command)],
             returncode=0,
-            stdout=json.dumps(
-                probe.__dict__
-                if hasattr(probe, "__dict__")
-                else {
-                    "prefix": probe.prefix,
-                    "base_prefix": probe.base_prefix,
-                    "executable": probe.executable,
-                    "python_version": probe.python_version,
-                    "sysconfig_platform": probe.sysconfig_platform,
-                    "machine": probe.machine,
-                    "os_name": probe.os_name,
-                    "purelib": probe.purelib,
-                    "platlib": probe.platlib,
-                }
-            ).encode(),
+            stdout=json.dumps(asdict(probe)).encode(),
             stderr=b"",
         )
 
@@ -179,6 +215,90 @@ def test_discovery_probes_venv_python_once_and_each_site_directory(tmp_path):
     assert calls == [python]
     assert case_calls == [purelib, platlib]
     assert len(environment.layouts) == 2
+
+
+@pytest.mark.parametrize("missing_field", _MARKER_FIELDS)
+def test_probe_mapping_requires_each_explicit_marker_field(missing_field):
+    values = asdict(probe_for(Path("/logical/venv")))
+    del values[missing_field]
+
+    with pytest.raises(EnvironmentDiscoveryError) as raised:
+        VenvProbe.from_mapping(values)
+
+    assert raised.value.code is EnvironmentDiscoveryErrorCode.INVALID_PROBE
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("platform_release", ""), ("sys_platform", "\0")),
+)
+def test_probe_mapping_rejects_malformed_marker_fields(field, value):
+    values = asdict(probe_for(Path("/logical/venv")))
+    values[field] = value
+
+    with pytest.raises(EnvironmentDiscoveryError) as raised:
+        VenvProbe.from_mapping(values)
+
+    assert raised.value.code is EnvironmentDiscoveryErrorCode.INVALID_PROBE
+
+
+def test_probe_mapping_accepts_pep440_prerelease_python_full_version():
+    values = asdict(probe_for(Path("/logical/venv")))
+    values["python_full_version"] = "3.14.0rc1"
+
+    probe = VenvProbe.from_mapping(values)
+
+    assert probe.python_full_version == "3.14.0rc1"
+    assert probe.python_version == "3.14"
+
+
+def test_probe_mapping_rejects_python_version_that_differs_from_full_release():
+    values = asdict(probe_for(Path("/logical/venv")))
+    values["python_full_version"] = "3.14.0rc1"
+    values["python_version"] = "3.13"
+
+    with pytest.raises(EnvironmentDiscoveryError) as raised:
+        VenvProbe.from_mapping(values)
+
+    assert raised.value.code is EnvironmentDiscoveryErrorCode.INVALID_PROBE
+
+
+@pytest.mark.parametrize(
+    ("releaselevel", "serial", "expected"),
+    (
+        ("alpha", 2, "3.14.0a2"),
+        ("beta", 3, "3.14.0b3"),
+        ("candidate", 1, "3.14.0c1"),
+        ("final", 0, "3.14.0"),
+    ),
+)
+def test_probe_script_formats_implementation_prereleases(
+    releaselevel, serial, expected
+):
+    # Packaging's implementation_version formatter uses releaselevel[0], so
+    # a candidate is ``c1`` here while platform.python_version() reports the
+    # PEP 440-equivalent ``rc1`` used for python_full_version.
+    parsed_script = ast.parse(environment_module._PROBE_SCRIPT)
+    formatter_definition = next(
+        node
+        for node in parsed_script.body
+        if isinstance(node, ast.FunctionDef) and node.name == "format_full_version"
+    )
+    formatter_module = ast.Module(body=[formatter_definition], type_ignores=[])
+    namespace = {}
+    exec(compile(formatter_module, "<probe-script>", "exec"), namespace)
+
+    actual = namespace["format_full_version"](
+        SimpleNamespace(
+            major=3,
+            minor=14,
+            micro=0,
+            releaselevel=releaselevel,
+            serial=serial,
+        )
+    )
+
+    assert actual == expected
 
 
 def test_probe_invokes_the_venv_python_in_isolated_mode(monkeypatch):
@@ -240,10 +360,18 @@ def test_venv_identity_accepts_windows_case_variants(tmp_path):
         prefix=str(prefix).upper(),
         base_prefix=str(tmp_path / "base-python"),
         executable=str(python).upper(),
-        python_version="3.14.0",
-        sysconfig_platform="win-amd64",
-        machine="AMD64",
+        implementation_name="cpython",
+        implementation_version="3.14.0",
         os_name="nt",
+        platform_machine="AMD64",
+        platform_python_implementation="CPython",
+        platform_release="test-release",
+        platform_system="Windows",
+        platform_version="test-version",
+        python_full_version="3.14.0",
+        python_version="3.14",
+        sys_platform="win32",
+        sysconfig_platform="win-amd64",
         purelib=str(prefix / "Lib" / "site-packages"),
         platlib=str(prefix / "Lib" / "site-packages"),
     )
@@ -271,6 +399,16 @@ def test_discovery_reads_an_actual_temporary_venv(tmp_path):
     assert environment.context.platform
     assert environment.context.architecture
     assert environment.layouts
+    assert environment.marker_environment.python_full_version == (
+        environment.context.python_version
+    )
+    assert environment.marker_environment.python_version == ".".join(
+        environment.context.python_version.split(".")[:2]
+    )
+    assert set(environment.marker_environment.as_mapping(extra="")) == {
+        *_MARKER_FIELDS,
+        "extra",
+    }
     assert all(layout.physical_prefix == prefix for layout in environment.layouts)
 
 
@@ -286,10 +424,18 @@ def test_discovery_rejects_non_venv_probe_without_leaking_paths_or_requirements(
         prefix=str(tmp_path / "outside"),
         base_prefix=probe.base_prefix,
         executable=probe.executable,
-        python_version=probe.python_version,
-        sysconfig_platform=probe.sysconfig_platform,
-        machine=probe.machine,
+        implementation_name=probe.implementation_name,
+        implementation_version=probe.implementation_version,
         os_name=probe.os_name,
+        platform_machine=probe.platform_machine,
+        platform_python_implementation=probe.platform_python_implementation,
+        platform_release=probe.platform_release,
+        platform_system=probe.platform_system,
+        platform_version=probe.platform_version,
+        python_full_version=probe.python_full_version,
+        python_version=probe.python_version,
+        sys_platform=probe.sys_platform,
+        sysconfig_platform=probe.sysconfig_platform,
         purelib=probe.purelib,
         platlib=probe.platlib,
     )
@@ -298,19 +444,7 @@ def test_discovery_rejects_non_venv_probe_without_leaking_paths_or_requirements(
         return subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=json.dumps(
-                {
-                    "prefix": probe.prefix,
-                    "base_prefix": probe.base_prefix,
-                    "executable": probe.executable,
-                    "python_version": probe.python_version,
-                    "sysconfig_platform": probe.sysconfig_platform,
-                    "machine": probe.machine,
-                    "os_name": probe.os_name,
-                    "purelib": probe.purelib,
-                    "platlib": probe.platlib,
-                }
-            ).encode(),
+            stdout=json.dumps(asdict(probe)).encode(),
             stderr=b"",
         )
 
@@ -344,10 +478,18 @@ def test_discovery_rejects_valid_json_with_non_numeric_python_version(tmp_path):
                     "prefix": probe.prefix,
                     "base_prefix": probe.base_prefix,
                     "executable": probe.executable,
-                    "python_version": "version-token",
-                    "sysconfig_platform": probe.sysconfig_platform,
-                    "machine": probe.machine,
+                    "implementation_name": probe.implementation_name,
+                    "implementation_version": probe.implementation_version,
                     "os_name": probe.os_name,
+                    "platform_machine": probe.platform_machine,
+                    "platform_python_implementation": probe.platform_python_implementation,
+                    "platform_release": probe.platform_release,
+                    "platform_system": probe.platform_system,
+                    "platform_version": probe.platform_version,
+                    "python_full_version": "version-token",
+                    "python_version": probe.python_version,
+                    "sys_platform": probe.sys_platform,
+                    "sysconfig_platform": probe.sysconfig_platform,
                     "purelib": probe.purelib,
                     "platlib": probe.platlib,
                 }

@@ -71,6 +71,9 @@ class DependencyGraphWarningCode(str, Enum):
     INVALID_REQUIRES_DIST = "invalid-requires-dist"
     MARKER_INDETERMINATE = "marker-indeterminate"
     MISSING_METADATA = "missing-metadata"
+    INVALID_METADATA = "invalid-metadata"
+    DUPLICATE_METADATA = "duplicate-metadata"
+    METADATA_NAME_MISMATCH = "metadata-name-mismatch"
     METADATA_VERSION_MISMATCH = "metadata-version-mismatch"
     MISSING_DEPENDENCY_TARGET = "missing-dependency-target"
 
@@ -143,6 +146,34 @@ class InstalledDistributionMetadata:
         if any(not isinstance(value, str) for value in requires_dist):
             raise TypeError("requires_dist must contain strings")
         object.__setattr__(self, "requires_dist", requires_dist)
+
+
+class InstalledMetadataStateKind(str, Enum):
+    """A safe adapter outcome for metadata that cannot be supplied to the graph."""
+
+    MISSING = "missing"
+    INVALID = "invalid"
+    DUPLICATE = "duplicate"
+    NAME_MISMATCH = "name-mismatch"
+    VERSION_MISMATCH = "version-mismatch"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InstalledMetadataState:
+    """Metadata availability for one installed distribution.
+
+    This deliberately records only the installed distribution identity and a
+    machine-readable condition.  Adapters must not put paths, headers, raw
+    metadata, parser diagnostics, or filesystem exception text in this model.
+    """
+
+    name: str
+    kind: InstalledMetadataStateKind
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", normalize_distribution_name(self.name))
+        if not isinstance(self.kind, InstalledMetadataStateKind):
+            raise TypeError("kind must be an InstalledMetadataStateKind")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -390,6 +421,20 @@ def _metadata_by_name(
     return by_name
 
 
+def _metadata_states_by_name(
+    metadata_states: Iterable[InstalledMetadataState],
+) -> dict[str, InstalledMetadataState]:
+    values = tuple(metadata_states)
+    if any(not isinstance(value, InstalledMetadataState) for value in values):
+        raise TypeError("metadata_states must contain InstalledMetadataState values")
+    by_name = {value.name: value for value in values}
+    if len(by_name) != len(values):
+        raise ValueError(
+            "metadata_states cannot contain duplicate normalized distribution names"
+        )
+    return by_name
+
+
 def _root_requirements(
     analysis: AnalysisResult,
     installed_versions: Mapping[str, str],
@@ -548,12 +593,39 @@ def _classify_nodes(
 def _usable_metadata(
     installed_versions: Mapping[str, str],
     supplied_metadata: Mapping[str, InstalledDistributionMetadata],
+    metadata_states: Mapping[str, InstalledMetadataState],
     warnings: set[DependencyGraphWarning],
 ) -> dict[str, InstalledDistributionMetadata]:
     usable_metadata: dict[str, InstalledDistributionMetadata] = {}
     for name, version in installed_versions.items():
+        state = metadata_states.get(name)
         value = supplied_metadata.get(name)
-        if value is None:
+        if state is not None:
+            code = {
+                InstalledMetadataStateKind.MISSING: (
+                    DependencyGraphWarningCode.MISSING_METADATA
+                ),
+                InstalledMetadataStateKind.INVALID: (
+                    DependencyGraphWarningCode.INVALID_METADATA
+                ),
+                InstalledMetadataStateKind.DUPLICATE: (
+                    DependencyGraphWarningCode.DUPLICATE_METADATA
+                ),
+                InstalledMetadataStateKind.NAME_MISMATCH: (
+                    DependencyGraphWarningCode.METADATA_NAME_MISMATCH
+                ),
+                InstalledMetadataStateKind.VERSION_MISMATCH: (
+                    DependencyGraphWarningCode.METADATA_VERSION_MISMATCH
+                ),
+            }[state.kind]
+            warnings.add(
+                DependencyGraphWarning(
+                    code=code,
+                    target_kind=DependencyGraphWarningTargetKind.DISTRIBUTION,
+                    target_identity=name,
+                )
+            )
+        elif value is None:
             warnings.add(
                 DependencyGraphWarning(
                     code=DependencyGraphWarningCode.MISSING_METADATA,
@@ -649,6 +721,8 @@ def build_dependency_graph(
     analysis: AnalysisResult,
     metadata: Iterable[InstalledDistributionMetadata],
     marker_environment: MarkerEnvironment,
+    *,
+    metadata_states: Iterable[InstalledMetadataState] = (),
 ) -> DependencyGraph:
     """Build a deterministic dependency graph from supplied installed metadata.
 
@@ -670,6 +744,7 @@ def build_dependency_graph(
     usable_metadata = _usable_metadata(
         installed_versions,
         _metadata_by_name(metadata),
+        _metadata_states_by_name(metadata_states),
         warnings,
     )
 

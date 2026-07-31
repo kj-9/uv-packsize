@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-01b: installed Core Metadata adapterをgraph coreへ接続する |
+| 次のタスク | P3-02: dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | installed Core Metadata adapterとgraph input境界 |
+| 次の成果物 | dependency pathとdirect/transitive/shared attributionを表示可能なresultへの接続 |
 
 ## ステータス定義
 
@@ -214,7 +214,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P2-06b | Phase 2 | Linux、macOS、Windowsのcross-platform layout golden coverageを追加する | `done` |
 | P2-07 | Phase 2 | wheel-onlyをデフォルトにし、build許可を明示opt-inにする | `done` |
 | P3-01a | Phase 3 | installed metadata dependency graphのpure coreを実装する | `done` |
-| P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `todo` |
+| P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `done` |
 | P3-02 | Phase 3 | dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する | `todo` |
 | P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
@@ -449,7 +449,50 @@ P2-06bの完了条件:
 - callerはhostの値を推測せず、全standard marker variableを持つtarget `MarkerEnvironment`を明示して渡す。metadataにないinstalled distribution、version不一致、active missing target、不正requirementはgraphを`incomplete`にする。
 - graphはsize totalを持たない。self/transitive byte attribution、表示、既存prefix mode、shared contributionの説明は後続P3 taskで扱う。
 
+### P3-01b: installed Core Metadata adapterをgraph coreへ接続する
+
+目的:
+
+- 実際に測定したinstalled environmentのCore Metadataだけを安全に読み、P3-01aのpure graphへ渡す境界を確立する。
+
+変更:
+
+- environment discoveryは、対象venvを1回だけprobeして完全な`MarkerEnvironment`を取得する。`implementation_*`、platform、Python versionを含むmarker値とpre-release semanticsは、実行中hostから推測せずtarget interpreterの値を使用する。
+- `InstalledEnvironment`はresolution context、inventory layout、target marker environmentを束ね、adapterはこのenvironmentにboundする。analysis contextとの不一致は、context値やpathを露出しないtyped errorとして拒否する。
+- adapterはvalidated inventory layoutのsite-packages直下にある非symlinkの`.dist-info` directoryだけを読む。`METADATA`も非symlink regular fileとして読み、Core Metadata version `1.0`、`1.1`、`1.2`、`2.1`〜`2.5`だけを受理する。
+- metadata欠損・不正・重複・name/version mismatchは、raw metadata、path、parser diagnosticを保持しないtyped metadata stateへ変換し、graphのsafe warning/completenessへ反映する。
+
+スコープ境界・既知の制約:
+
+- graphは内部modelのままとし、既存text出力、JSON schema v1、公開CLI契約は変更しない。Core Metadata graphはinstalled metadataによる説明情報であり、resolver provenanceを主張するものではない。
+- dependency pathとdirect/transitive/shared attributionの表示可能なresultへの接続はP3-02で扱う。
+
 ## 作業記録
+
+### 2026-07-31: P3-01b installed Core Metadata adapter
+
+状態: `done`
+
+実装:
+
+- target venvを一度だけprobeし、完全な`MarkerEnvironment`とPackagingのpre-release semanticsをtarget interpreter由来の値でgraph coreへ渡すようにした。
+- `InstalledEnvironment`にcontext、inventory layouts、marker environmentを束ね、`uv_packsize/installed_metadata.py`のadapterをこのenvironmentへboundした。analysisとのcontext mismatchは、値やfilesystem pathを露出しないtyped errorにした。
+- adapterはsite-packagesのdirect childである非symlink `.dist-info` directoryだけを対象に、非symlink regular `METADATA`を読む。Core Metadata version `1.0`、`1.1`、`1.2`、`2.1`〜`2.5`だけを受理する。
+- metadataのmissing、invalid、duplicate、name mismatch、version mismatchをsafe typed metadata stateへ変換し、graph warning/completenessへ接続した。raw metadata、parser diagnostic、filesystem pathはgraph resultへ残さない。
+- graphは内部modelのまま維持し、既存text出力、JSON schema v1、公開CLI契約を変更していない。Core Metadata graphはinstalled metadataに基づく説明情報であり、resolver provenanceではない。
+- artifact verifierのcritical module一覧へ`uv_packsize/installed_metadata.py`を追加し、wheelとsdistの両方にadapterが含まれることを確認する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 355 passed, 1 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check` — 成功。
+- `git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make verify-build` — wheel/sdist metadata、artifact inventory、installed entry pointを検証して成功。
+
+引き継ぎ:
+
+- 次のタスクはP3-02とする。P3-01bのCore Metadata graphを、dependency pathとdirect/transitive/shared attributionを表示可能なresultへ接続する。resolverの判断・provenanceをCore Metadata graphから推測しない。
 
 ### 2026-07-31: P3-01a installed metadata dependency graph pure core
 

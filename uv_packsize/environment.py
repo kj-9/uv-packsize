@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
+from uv_packsize.dependency_graph import MarkerEnvironment
 from uv_packsize.inventory import InventoryLayout
 from uv_packsize.models import BuildPolicy, CaseRule, PathFlavor, ResolutionContext
 
@@ -28,19 +31,35 @@ import platform
 import sys
 import sysconfig
 
+
+def format_full_version(version):
+    formatted = f"{version.major}.{version.minor}.{version.micro}"
+    if version.releaselevel != "final":
+        formatted += f"{version.releaselevel[0]}{version.serial}"
+    return formatted
+
+
 print(json.dumps({
     "prefix": sys.prefix,
     "base_prefix": sys.base_prefix,
     "executable": sys.executable,
-    "python_version": platform.python_version(),
-    "sysconfig_platform": sysconfig.get_platform(),
-    "machine": platform.machine(),
+    "implementation_name": sys.implementation.name,
+    "implementation_version": format_full_version(sys.implementation.version),
     "os_name": os.name,
+    "platform_machine": platform.machine(),
+    "platform_python_implementation": platform.python_implementation(),
+    "platform_release": platform.release(),
+    "platform_system": platform.system(),
+    "platform_version": platform.version(),
+    "python_full_version": platform.python_version(),
+    "python_version": ".".join(platform.python_version_tuple()[:2]),
+    "sys_platform": sys.platform,
+    "sysconfig_platform": sysconfig.get_platform(),
     "purelib": sysconfig.get_path("purelib"),
     "platlib": sysconfig.get_path("platlib"),
 }))
 """
-_NUMERIC_PYTHON_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+_NUMERIC_PYTHON_VERSION = re.compile(r"^[0-9]+\.[0-9]+$")
 
 
 class EnvironmentDiscoveryErrorCode(str, Enum):
@@ -70,10 +89,18 @@ class VenvProbe:
     prefix: str
     base_prefix: str
     executable: str
-    python_version: str
-    sysconfig_platform: str
-    machine: str
+    implementation_name: str
+    implementation_version: str
     os_name: str
+    platform_machine: str
+    platform_python_implementation: str
+    platform_release: str
+    platform_system: str
+    platform_version: str
+    python_full_version: str
+    python_version: str
+    sys_platform: str
+    sysconfig_platform: str
     purelib: str
     platlib: str
 
@@ -83,10 +110,18 @@ class VenvProbe:
             "prefix",
             "base_prefix",
             "executable",
-            "python_version",
-            "sysconfig_platform",
-            "machine",
+            "implementation_name",
+            "implementation_version",
             "os_name",
+            "platform_machine",
+            "platform_python_implementation",
+            "platform_release",
+            "platform_system",
+            "platform_version",
+            "python_full_version",
+            "python_version",
+            "sys_platform",
+            "sysconfig_platform",
             "purelib",
             "platlib",
         )
@@ -97,11 +132,18 @@ class VenvProbe:
                 EnvironmentDiscoveryErrorCode.INVALID_PROBE,
                 "python-probe",
             ) from error
-        if any(
-            not isinstance(value, str) or not value.strip() or "\0" in value
-            for value in probe_values.values()
-        ) or not _NUMERIC_PYTHON_VERSION.fullmatch(
-            _probe_string(probe_values["python_version"])
+        if (
+            any(
+                not isinstance(value, str) or not value.strip() or "\0" in value
+                for value in probe_values.values()
+            )
+            or not _NUMERIC_PYTHON_VERSION.fullmatch(
+                _probe_string(probe_values["python_version"])
+            )
+            or not _python_versions_match(
+                full_version=_probe_string(probe_values["python_full_version"]),
+                major_minor=_probe_string(probe_values["python_version"]),
+            )
         ):
             raise EnvironmentDiscoveryError(
                 EnvironmentDiscoveryErrorCode.INVALID_PROBE,
@@ -111,12 +153,41 @@ class VenvProbe:
             prefix=_probe_string(probe_values["prefix"]),
             base_prefix=_probe_string(probe_values["base_prefix"]),
             executable=_probe_string(probe_values["executable"]),
-            python_version=_probe_string(probe_values["python_version"]),
-            sysconfig_platform=_probe_string(probe_values["sysconfig_platform"]),
-            machine=_probe_string(probe_values["machine"]),
+            implementation_name=_probe_string(probe_values["implementation_name"]),
+            implementation_version=_probe_string(
+                probe_values["implementation_version"]
+            ),
             os_name=_probe_string(probe_values["os_name"]),
+            platform_machine=_probe_string(probe_values["platform_machine"]),
+            platform_python_implementation=_probe_string(
+                probe_values["platform_python_implementation"]
+            ),
+            platform_release=_probe_string(probe_values["platform_release"]),
+            platform_system=_probe_string(probe_values["platform_system"]),
+            platform_version=_probe_string(probe_values["platform_version"]),
+            python_full_version=_probe_string(probe_values["python_full_version"]),
+            python_version=_probe_string(probe_values["python_version"]),
+            sys_platform=_probe_string(probe_values["sys_platform"]),
+            sysconfig_platform=_probe_string(probe_values["sysconfig_platform"]),
             purelib=_probe_string(probe_values["purelib"]),
             platlib=_probe_string(probe_values["platlib"]),
+        )
+
+    def marker_environment(self) -> MarkerEnvironment:
+        """Return the complete PEP 508 environment reported by this interpreter."""
+
+        return MarkerEnvironment(
+            implementation_name=self.implementation_name,
+            implementation_version=self.implementation_version,
+            os_name=self.os_name,
+            platform_machine=self.platform_machine,
+            platform_python_implementation=self.platform_python_implementation,
+            platform_release=self.platform_release,
+            platform_system=self.platform_system,
+            platform_version=self.platform_version,
+            python_full_version=self.python_full_version,
+            python_version=self.python_version,
+            sys_platform=self.sys_platform,
         )
 
 
@@ -126,10 +197,20 @@ class InstalledEnvironment:
 
     context: ResolutionContext
     layouts: tuple[InventoryLayout, ...]
+    marker_environment: MarkerEnvironment
 
     def __post_init__(self) -> None:
         if not isinstance(self.context, ResolutionContext):
             raise TypeError("context must be a ResolutionContext")
+        if not isinstance(self.marker_environment, MarkerEnvironment):
+            raise TypeError("marker_environment must be a MarkerEnvironment")
+        if (
+            self.context.python_version != self.marker_environment.python_full_version
+            or self.context.architecture != self.marker_environment.platform_machine
+            or self.context.path_flavor
+            is not _path_flavor(self.marker_environment.os_name)
+        ):
+            raise ValueError("context must match the target marker environment")
         layouts = tuple(self.layouts)
         if not layouts or any(
             not isinstance(layout, InventoryLayout) for layout in layouts
@@ -156,6 +237,16 @@ def _probe_string(value: object) -> str:
     if not isinstance(value, str):
         raise AssertionError("validated probe field must be a string")
     return value
+
+
+def _python_versions_match(*, full_version: str, major_minor: str) -> bool:
+    """Validate a full PEP 440 version and its target major.minor projection."""
+
+    try:
+        release = Version(full_version).release
+    except InvalidVersion:
+        return False
+    return len(release) >= 3 and major_minor == f"{release[0]}.{release[1]}"
 
 
 def discover_installed_environment(  # noqa: PLR0913
@@ -286,9 +377,9 @@ def build_installed_environment(  # noqa: PLR0913
         ) from error
     context = ResolutionContext(
         requirements=requirements,
-        python_version=probe.python_version,
+        python_version=probe.python_full_version,
         platform=probe.sysconfig_platform,
-        architecture=probe.machine,
+        architecture=probe.platform_machine,
         path_flavor=path_flavor,
         case_rule=purelib_case_rule,
         uv_version=uv_version,
@@ -298,7 +389,11 @@ def build_installed_environment(  # noqa: PLR0913
         index_identifiers=index_identifiers,
         resolution_strategy=resolution_strategy,
     )
-    return InstalledEnvironment(context=context, layouts=layouts)
+    return InstalledEnvironment(
+        context=context,
+        layouts=layouts,
+        marker_environment=probe.marker_environment(),
+    )
 
 
 def detect_case_rule(site_packages: Path) -> CaseRule:
