@@ -319,6 +319,8 @@ uvプロジェクトやlockfileを分析するモードでは、[`uv workspace m
 - `pyproject.toml`でポリシーを設定できるようにする。
 - GitHub Actionsの最小利用例を用意する。
 
+Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b）、CLI/config入力、exit code、CI exampleへ分割して進める。入力・公開契約・CI integrationをdomain modelと同じ変更単位に混ぜない。
+
 完了条件:
 
 - dependency updateのPRで、増減したdistributionとbyte数を表示できる。
