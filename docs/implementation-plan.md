@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | P3-05: 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する |
-| 次のタスク | P3-05b: root contribution resultのpure text presentationを実装する |
+| 次のタスク | P3-05c: root contributionをCLI/README/local integrationへ接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -227,7 +227,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-04c1 | Phase 3 | prefix CLI core/unit契約を接続する | `done` |
 | P3-04c2 | Phase 3 | prefix README契約とlocal end-to-end検証を接続する | `done` |
 | P3-05a | Phase 3 | root set単位の純粋なnon-split byte aggregateを実装する | `done` |
-| P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `todo` |
+| P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `done` |
 | P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -673,6 +673,28 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP3-05bとする。P3-05a resultをpure text presentationへ接続し、既存report、CLI、README、JSON schemaを変更しない。
+
+### 2026-07-31: P3-05b root contribution pure text presentation
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/root_contribution_render.py`](../uv_packsize/root_contribution_render.py)に、既存の通常reportをbyte-identical prefixとして再利用する`render_root_contribution_report()`と、将来のexplain/breakdown合成向けの`render_root_contribution_sections()`を追加した。後者はgraph warning code/count summaryの重複を抑止できる。
+- complete graphでは、1-based input indices、exclusive/shared/closureを持つroot table、exact shared root-set table、exclusive/shared/unattributed/global totalのreconciliationを表示する。closureのroot間非加算とreconciliationの加算式を明示し、全bytesは既存`format_size()`で表示する。
+- incomplete graphではcontribution sectionの数値およびraw target/pathを出さず、availabilityと安全なwarning code/countだけを表示する。inventory incompleteでは測定済みpartial値を維持し、安全なnoteを追加する。terminal control文字は表示ラベルから置換する。
+- [`tests/test_root_contribution_render.py`](../tests/test_root_contribution_render.py)で既存prefix、`--bin`相当のpresentation不変性、duplicate input index、shared/zero/rootなし、KiB/MiB/GiB境界と複数size列のalignment、graph/inventory incomplete、terminal sanitization、型検証、warning重複抑止をnetwork不要で検証した。artifact verifierに新renderer moduleを追加した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_root_contribution_render.py -q` — 成功（11 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（528 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run python scripts/verify_build.py`、`git diff --check` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-05cとする。root contributionのtext-only public CLI option、README、local wheel integrationを接続し、既存JSON schemaを変更しない。
 
 ## 作業記録
 
