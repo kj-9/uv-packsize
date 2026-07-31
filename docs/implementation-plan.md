@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-04c: budget policy inputのpure parser/normalizer contractを設計・実装する |
+| 次のタスク | P4-04d: pyproject policy source resolution/file I/O contractを設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-04c: trusted policy mappingから`BudgetPolicy`へのpure parser/normalizer |
+| 次の成果物 | P4-04d: pyproject policy source resolution/file I/O boundary |
 
 ## ステータス定義
 
@@ -241,7 +241,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `done` |
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `done` |
 | P4-04b | Phase 4 | budget text/result presentation contractをpureに設計・実装する | `done` |
-| P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `todo` |
+| P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `done` |
+| P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -877,7 +878,8 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-03d | `done` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
 | P4-04a | `done` | P4-03a, P4-03d | `uv_packsize/budget.py`（新規）、`tests/test_budget.py`（新規）、`scripts/verify_build.py` | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで実装した。 |
 | P4-04b | `done` | P4-04a | `uv_packsize/budget_render.py`（新規）、`tests/test_budget_render.py`（新規）、`scripts/verify_build.py` | exactな`BudgetEvaluation`だけを再検証して受けるsafeかつdeterministicなtext presentationを実装した。canonical global authority、configured metric、no-op、completeness policy、fixed violation orderをpureに表示し、CLI/config/JSON schema/exit codeは変更しない。 |
-| P4-04c | `todo` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`docs/implementation-plan.md` | policy入力のpure parser/normalizer契約を固定する。trusted mappingから`BudgetPolicy`への変換、unknown/type/range/incomplete policy errorのsanitized typed error、empty policyを検証し、CLI、`pyproject.toml` I/O、exit code、CIは接続しない。 |
+| P4-04c | `done` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`scripts/verify_build.py`、`docs/implementation-plan.md` | exact built-in `dict`だけをtrusted policy mappingとして受ける`parse_budget_policy()`を実装した。closed snake_case keys、missing field/default no-op、exact nonbool integer range、exact incomplete-policy string、unknown/type/range/incomplete-policy/internal-inputのfixed taxonomyとpriority、safe enum field/path付きsanitized typed errorをunit testで固定した。CLI、`pyproject.toml` I/O、exit code、CIは未接続。 |
+| P4-04d | `todo` | P4-04c | `uv_packsize/budget_config_source.py`（新規候補）、`tests/test_budget_config_source.py`（新規候補）、`docs/implementation-plan.md`、必要なら`docs/roadmap.md` | `pyproject.toml`からpolicy sectionを選ぶsource-resolution/file I/O境界を設計・実装し、P4-04cのpure parserへ渡すtrusted builtin mappingだけを生成する。source precedence、missing section/file、TOML parse/read failure、sanitized diagnosticsを固定する。CLI option、budget exit code、README、CI workflowは接続しない。 |
 
 検証:
 
@@ -886,9 +888,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P4-04cとする。trusted policy inputのpure parser/normalizerを先に固定し、その後にCLI/config file I/O、exit code、CI exampleを独立した完了単位として接続する。
+- P4-04dとする。`pyproject.toml` policy source resolution/file I/OをP4-04cのpure parserへ接続する境界だけを固定し、CLI option、budget exit code、README、CI exampleは別タスクに残す。
 
 ## 作業記録
+
+### 2026-07-31: P4-04c budget policy mapping normalization
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/budget_config.py`に、trusted sourceから得たexact built-in `dict`を受けるpureな`parse_budget_policy()`を追加した。mapping/custom mapping subclassを拒否し、closed snake_case keysだけを許可する。
+- 空mappingとmissing fieldは`BudgetPolicy` defaultへ正規化し、明示valueはnonbool exact integerの`0..MAX_BASELINE_INTEGER`またはexact stringの`fail`/`allow-partial`だけを受ける。`None`、bool、integer/string subclass、`IncompleteBudgetPolicy` enum instanceはinput valueとして許可しない。
+- `BudgetPolicyConfigError`はraw mapping/key/value/reprを保持せず、stable reasonとknown field enum（unknown/non-string keyは`None`）だけを公開する。mapping、unknown、type、limit range、不正incomplete-policy string、domain constructorの想定外input failureを別reasonへ正規化し、unknown keyをknown-field value validationより先に処理する固定priorityと、resultがsource mutationを保持しない境界を検証した。
+- artifact verifierへ新moduleを追加した。config sourceのfile I/O、CLI、JSON schema、exit code、README、CI workflowは変更していない。
+
+テスト:
+
+- no-op/default、全known field、mapping/key/scalar exact-type boundary、unknown key、bool/type、limit range、不正incomplete-policy string、domain constructor fallback、unknown+bad value priority、secret-like key/value/内部例外の非露出、deterministic immutable outcomeをnetwork/I/Oなしで検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_budget.py tests/test_budget_render.py tests/test_budget_config.py -q` — 成功（52 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format --check uv_packsize/budget_config.py tests/test_budget_config.py`、`uv run --locked ruff check uv_packsize/budget_config.py tests/test_budget_config.py`、`uv run --locked ty check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（748 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。wheel/sdistへのnew module含有、artifact metadata、installed entry pointを検証した。
+
+次のタスク:
+
+- P4-04dで`pyproject.toml` policy source resolution/file I/O contractを小さく固定する。P4-04cのpure parserだけを接続し、CLI option、budget exit code、README、CI exampleはこの変更単位に含めない。
 
 ### 2026-07-31: P4-04b budget pure text presentation
 
