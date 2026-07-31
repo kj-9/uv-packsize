@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-02b: compare CLI/read boundaryを小単位で設計・実装する |
+| 次のタスク | P4-02b2: compare CLI/read boundaryを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-02b: compare CLI/read boundary |
+| 次の成果物 | P4-02b2: compare CLI/read boundary |
 
 ## ステータス定義
 
@@ -232,6 +232,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `done` |
 | P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `done` |
 | P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `done` |
+| P4-02b1 | Phase 4 | current `AnalysisResult`からsafe baseline comparison projectionを実装する | `done` |
+| P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -795,7 +797,29 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 引き継ぎ:
 
-- 次のタスクはP4-02bとする。baseline read/compare error boundaryとCLI表示を小単位で接続する。JSON schema、budget policy、baseline書込みは別taskとして扱う。
+- P4-02bは、current resultのpure projection（P4-02b1）とbaseline read/compare CLI boundary（P4-02b2）へ分割する。JSON schema、budget policy、baseline書込みは別taskとして扱う。
+
+### 2026-07-31: P4-02b1 current AnalysisResult baseline projection
+
+状態: `done`
+
+実装:
+
+- `analysis_result_to_baseline()`を追加し、exactな`AnalysisResult`かつfresh `ResolutionContext`だけをschema v1の比較用`Baseline`へ直接縮約する。既存prefix contextはtypedに拒否し、JSON serializer/decoderを経由しない。
+- requirementは既存JSONと同じnon-reversible projection、free-form contextは同じdomain-separated fingerprintへ縮約する。raw requirement、index credential、path、symlink target、free-form contextはcomparison modelへ保持しない。
+- global/distribution totalsとduplicate ownershipはvalidated `AnalysisResult` propertiesから導出し、distribution totalsの重複所有とglobal deduplicationの差を保持する。
+- `BaselineWarningSummary.warning_code_counts`はroot warningとdistribution warningのcanonical aggregateへ統一した。これによりdistribution-only incomplete warningを含むpublic baselineもparse後にself comparisonできる。公開JSON schema/bytesは不変である。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_baseline.py tests/test_diff.py -q` — 成功（63 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（630 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP4-02b2とする。baseline read/compare error boundaryとCLI表示を接続する。
 
 ## 作業記録
 

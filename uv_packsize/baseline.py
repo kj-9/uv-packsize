@@ -16,9 +16,10 @@ from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
-from .models import normalize_distribution_name
+from .json_render import _requirement_projection
+from .models import AnalysisResult, ResolutionContext, normalize_distribution_name
 
 MAX_BASELINE_BYTES = 8 * 1024 * 1024
 MAX_BASELINE_NESTING = 64
@@ -165,6 +166,106 @@ class Baseline:
     duplicate_ownership: BaselineDuplicateOwnershipSummary
     resolution_context: BaselineResolutionContext | None
     existing_prefix_context: BaselineExistingPrefixContext | None
+
+
+def _baseline_requirement_from_input(
+    input_index: int, requirement: str
+) -> BaselineRequirement:
+    """Apply the public JSON requirement redaction without rendering JSON."""
+
+    projection = _requirement_projection(input_index, requirement)
+    return BaselineRequirement(
+        input_index=cast(int, projection["input_index"]),
+        kind=cast(str, projection["kind"]),
+        name=cast(str | None, projection["name"]),
+        extras=tuple(cast(list[str], projection["extras"])),
+        has_specifier=cast(bool, projection["has_specifier"]),
+        has_marker=cast(bool, projection["has_marker"]),
+    )
+
+
+def analysis_result_to_baseline(result: AnalysisResult) -> Baseline:
+    """Project a fresh-install analysis into the safe v1 comparison model.
+
+    This deliberately does not serialize the analysis result.  The projection
+    mirrors the committed v1 JSON decoder while retaining only comparison
+    fields, so requirements and free-form resolver observations remain
+    non-reversible and file paths never enter the baseline representation.
+    """
+
+    if type(result) is not AnalysisResult:
+        raise TypeError("result must be an exact AnalysisResult")
+    if type(result.context) is not ResolutionContext:
+        raise TypeError("result must have a fresh ResolutionContext")
+
+    context = result.context
+    requirements = tuple(
+        _baseline_requirement_from_input(index, requirement)
+        for index, requirement in enumerate(context.requirements)
+    )
+    distributions = tuple(
+        BaselineDistribution(
+            name=distribution.name,
+            version=distribution.version,
+            logical_bytes=distribution.total_logical_bytes,
+        )
+        for distribution in result.distributions
+    )
+    warning_counts = Counter(warning.code.value for warning in result.warnings)
+    for distribution in result.distributions:
+        warning_counts.update(warning.code.value for warning in distribution.warnings)
+    warning_code_counts = tuple(sorted(warning_counts.items()))
+    duplicate_count = len(result.duplicate_ownerships)
+    global_logical_bytes = result.total_logical_bytes
+    if any(
+        value > MAX_BASELINE_INTEGER
+        for value in (
+            global_logical_bytes,
+            *(distribution.logical_bytes for distribution in distributions),
+            *(count for _, count in warning_code_counts),
+            duplicate_count,
+        )
+    ):
+        raise ValueError("analysis result exceeds baseline integer bounds")
+
+    return Baseline(
+        schema_version=1,
+        input_kind="fresh-install",
+        measurement=BaselineMeasurement(
+            kind="installed-logical-size",
+            unit="bytes",
+            ownership="distribution-owned-files",
+            deduplication="canonical-identity",
+        ),
+        global_logical_bytes=global_logical_bytes,
+        distributions=distributions,
+        warnings=BaselineWarningSummary(
+            completeness=result.completeness.value,
+            warning_code_counts=warning_code_counts,
+        ),
+        duplicate_ownership=BaselineDuplicateOwnershipSummary(
+            present=bool(duplicate_count), count=duplicate_count
+        ),
+        resolution_context=BaselineResolutionContext(
+            requirements=requirements,
+            python_version_fingerprint=_fingerprint(
+                "python_version", context.python_version
+            ),
+            platform_fingerprint=_fingerprint("platform", context.platform),
+            architecture_fingerprint=_fingerprint("architecture", context.architecture),
+            path_flavor=context.path_flavor.value,
+            case_rule=context.case_rule.value,
+            uv_version_fingerprint=_fingerprint("uv_version", context.uv_version),
+            build_policy=context.build_policy.value,
+            compile_bytecode=context.compile_bytecode,
+            extras=context.extras,
+            index_identifiers=context.index_identifiers,
+            resolution_strategy_fingerprint=_fingerprint(
+                "resolution_strategy", context.resolution_strategy
+            ),
+        ),
+        existing_prefix_context=None,
+    )
 
 
 def _error(code: str, field: str) -> NoReturn:
@@ -371,12 +472,14 @@ def _validate_distributions(
     int,
     dict[str, tuple[str, ...]],
     bool,
+    Counter[str],
 ]:
     distributions: list[BaselineDistribution] = []
     identities: set[str] = set()
     files_by_identity: dict[str, tuple[int, str, bool]] = {}
     owners_by_identity: dict[str, set[str]] = {}
     has_incomplete_warning = False
+    warning_counts: Counter[str] = Counter()
     for item in _array(value, "distributions"):
         document = _object(
             item,
@@ -396,6 +499,7 @@ def _validate_distributions(
             _validate_warning(warning, "distributions[].warnings[]")
             for warning in _array(document["warnings"], "distributions[].warnings")
         ]
+        warning_counts.update(code for code, _, _ in warnings)
         if any(code == "duplicate-ownership" for code, _, _ in warnings):
             _error("inconsistent-ownership", "distributions[].warnings")
         distribution_identity = f"{normalized_name}=={version}"
@@ -441,6 +545,7 @@ def _validate_distributions(
         sum(signature[0] for signature in files_by_identity.values()),
         duplicate_owners,
         has_incomplete_warning,
+        warning_counts,
     )
 
 
@@ -688,8 +793,9 @@ def parse_baseline_json(  # noqa: PLR0912, PLR0915
         expected_global_bytes,
         expected_duplicate_owners,
         has_distribution_incomplete_warning,
+        distribution_warning_counts,
     ) = _validate_distributions(root["distributions"])
-    warning_counts: Counter[str] = Counter()
+    warning_counts = distribution_warning_counts
     duplicate_warning_identities: set[str] = set()
     for warning in _array(root["warnings"], "warnings"):
         code, target_kind, target_identity = _validate_warning(warning, "warnings[]")

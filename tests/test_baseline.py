@@ -11,8 +11,26 @@ from uv_packsize.baseline import (
     MAX_BASELINE_BYTES,
     BaselineError,
     BaselineLoadError,
+    analysis_result_to_baseline,
     load_baseline,
     parse_baseline_json,
+)
+from uv_packsize.diff import compare_baselines
+from uv_packsize.json_render import render_analysis_json
+from uv_packsize.models import (
+    AnalysisResult,
+    AnalysisWarning,
+    BuildPolicy,
+    CaseRule,
+    DistributionResult,
+    ExistingPrefixContext,
+    FileCategory,
+    FileEntry,
+    FileOrigin,
+    PathFlavor,
+    ResolutionContext,
+    WarningCode,
+    WarningTargetKind,
 )
 
 _ROOT = Path(__file__).parents[1]
@@ -29,6 +47,186 @@ def _golden(version: int) -> dict[str, object]:
 
 def _parse(document: object):
     return parse_baseline_json(json.dumps(document))
+
+
+def _projection_result(*, reverse: bool = False) -> AnalysisResult:
+    context = ResolutionContext(
+        requirements=(
+            "Example[docs,Speed]>=1; python_version >= '3.11'",
+            "git+https://token@example.invalid/private/repo.git",
+            "../private/package.whl",
+            "not a valid requirement @@@",
+        ),
+        python_version="3.14.0 private",
+        platform="platform private",
+        architecture="x86_64 private",
+        path_flavor=PathFlavor.POSIX,
+        case_rule=CaseRule.SENSITIVE,
+        uv_version="0.11.3 private",
+        build_policy=BuildPolicy.ALLOW_BUILD,
+        compile_bytecode=False,
+        extras=("Docs", "speed"),
+        index_identifiers=("internal-primary", "pypi"),
+        resolution_strategy="highest private",
+    )
+    shared = FileEntry(
+        path="lib/shared.py",
+        canonical_identity="lib/shared.py",
+        logical_bytes=7,
+        category=FileCategory.PYTHON,
+        origin=FileOrigin.RECORD,
+    )
+    alpha = DistributionResult(
+        name="Alpha_Pkg",
+        version="1.0",
+        files=(
+            FileEntry(
+                path="lib/alpha.py",
+                canonical_identity="lib/alpha.py",
+                logical_bytes=5,
+                category=FileCategory.PYTHON,
+                origin=FileOrigin.RECORD,
+            ),
+            shared,
+        ),
+    )
+    zeta = DistributionResult(
+        name="zeta",
+        version="2.0",
+        files=(shared,),
+        warnings=(
+            AnalysisWarning(
+                code=WarningCode.MISSING_RECORD,
+                target_kind=WarningTargetKind.DISTRIBUTION,
+                target_identity="zeta==2.0",
+            ),
+        ),
+    )
+    return AnalysisResult(
+        context=context,
+        distributions=(zeta, alpha) if reverse else (alpha, zeta),
+        warnings=(
+            AnalysisWarning(
+                code=WarningCode.MISSING_FILE,
+                target_kind=WarningTargetKind.FILE,
+                target_identity="private/missing.py",
+            ),
+        ),
+    )
+
+
+def test_analysis_result_to_baseline_matches_public_v1_json_projection():
+    result = _projection_result()
+
+    expected = parse_baseline_json(render_analysis_json(result))
+    projected = analysis_result_to_baseline(result)
+
+    assert projected == expected
+    assert hash(projected) == hash(expected)
+    assert projected.global_logical_bytes == 12
+    assert sum(item.logical_bytes for item in projected.distributions) == 19
+    assert projected.warnings.completeness == "incomplete"
+    assert projected.warnings.warning_code_counts == (
+        ("duplicate-ownership", 1),
+        ("missing-file", 1),
+        ("missing-record", 1),
+    )
+    assert projected.duplicate_ownership.present is True
+    assert projected.duplicate_ownership.count == 1
+
+
+def test_analysis_result_to_baseline_is_deterministic_and_never_renders_json(
+    monkeypatch,
+):
+    expected = analysis_result_to_baseline(_projection_result())
+
+    def fail_render(*args, **kwargs):
+        raise AssertionError("JSON serialization must not be used for projection")
+
+    monkeypatch.setattr("uv_packsize.json_render.render_analysis_json", fail_render)
+    assert analysis_result_to_baseline(_projection_result(reverse=True)) == expected
+
+
+def test_analysis_result_to_baseline_handles_empty_fresh_analysis():
+    source = AnalysisResult(
+        context=ResolutionContext(
+            requirements=("example",),
+            python_version="3.14",
+            platform="linux",
+            architecture="x86_64",
+            path_flavor=PathFlavor.WINDOWS,
+            case_rule=CaseRule.INSENSITIVE,
+            uv_version="0.11",
+            build_policy=BuildPolicy.WHEEL_ONLY,
+            compile_bytecode=True,
+        ),
+        distributions=(),
+    )
+
+    assert analysis_result_to_baseline(source) == parse_baseline_json(
+        render_analysis_json(source)
+    )
+
+
+def test_analysis_result_to_baseline_rejects_non_fresh_and_forged_inputs():
+    secret = "private-token"
+
+    class DerivedAnalysisResult(AnalysisResult):
+        pass
+
+    existing = AnalysisResult(
+        context=ExistingPrefixContext(
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+            platform=secret,
+        ),
+        distributions=(),
+    )
+    derived = DerivedAnalysisResult(
+        context=_projection_result().context,
+        distributions=(),
+    )
+
+    for value in (existing, derived, cast(Any, object())):
+        with pytest.raises(TypeError) as captured:
+            analysis_result_to_baseline(value)
+        assert secret not in str(captured.value)
+
+
+def test_distribution_only_warning_summary_is_comparable_and_matches_projection():
+    result = AnalysisResult(
+        context=ResolutionContext(
+            requirements=("example",),
+            python_version="3.14",
+            platform="linux",
+            architecture="x86_64",
+            path_flavor=PathFlavor.POSIX,
+            case_rule=CaseRule.SENSITIVE,
+            uv_version="0.11",
+            build_policy=BuildPolicy.WHEEL_ONLY,
+            compile_bytecode=False,
+        ),
+        distributions=(
+            DistributionResult(
+                name="example",
+                version="1",
+                files=(),
+                warnings=(
+                    AnalysisWarning(
+                        code=WarningCode.MISSING_RECORD,
+                        target_kind=WarningTargetKind.DISTRIBUTION,
+                        target_identity="example==1",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    parsed = parse_baseline_json(render_analysis_json(result))
+    assert parsed.warnings.warning_code_counts == (("missing-record", 1),)
+    assert parsed.warnings.completeness == "incomplete"
+    assert compare_baselines(parsed, parsed).completeness.value == "incomplete"
+    assert analysis_result_to_baseline(result) == parsed
 
 
 def test_parse_baseline_accepts_committed_v1_and_v2_goldens_with_safe_projection():
@@ -49,6 +247,7 @@ def test_parse_baseline_accepts_committed_v1_and_v2_goldens_with_safe_projection
     assert v1.warnings.warning_code_counts == (
         ("duplicate-ownership", 1),
         ("missing-file", 1),
+        ("missing-record", 1),
     )
     assert v1.duplicate_ownership.present is True
     assert v1.resolution_context is not None
