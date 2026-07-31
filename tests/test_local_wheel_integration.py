@@ -109,6 +109,24 @@ def test_real_uv_install_from_local_wheels_renders_text_and_scripts(tmp_path):
     assert default.stderr == with_scripts.stderr == ""
 
 
+def test_real_uv_install_from_local_wheels_explains_shared_dependency(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    completed = _run_cli(tmp_path, wheelhouse, "--explain")
+
+    assert completed.returncode == 0
+    assert "--- Requested Roots ---" in completed.stdout
+    assert f"1  {_ROOT_A}  recognized" in completed.stdout
+    assert f"2  {_ROOT_B}  recognized" in completed.stdout
+    assert "--- Dependency Attribution ---" in completed.stdout
+    assert f"{_SHARED}  1.0.0  direct  yes" in completed.stdout
+    assert "--- Dependency Paths ---" in completed.stdout
+    assert f"1  {_ROOT_A} -> {_SHARED}" in completed.stdout
+    assert f"2  {_ROOT_B} -> {_SHARED}" in completed.stdout
+    assert completed.stderr == ""
+
+
 def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
@@ -168,6 +186,18 @@ def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_pat
         "global_logical_bytes": distribution_total,
         "distribution_logical_bytes": distribution_total,
     }
+
+
+def test_real_uv_install_from_local_wheels_json_explain_is_byte_identical(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    default = _run_cli(tmp_path, wheelhouse, "--json")
+    with_explain = _run_cli(tmp_path, wheelhouse, "--json", "--explain")
+
+    assert default.returncode == with_explain.returncode == 0
+    assert default.stdout == with_explain.stdout
+    assert default.stderr == with_explain.stderr
 
 
 def _run_cli(

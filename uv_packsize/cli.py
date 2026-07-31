@@ -12,9 +12,15 @@ from pathlib import Path
 import click
 
 from uv_packsize.analysis import AnalysisContextError, analyze_installed_environment
+from uv_packsize.dependency_paths import explain_dependency_paths
 from uv_packsize.environment import (
     EnvironmentDiscoveryError,
     discover_installed_environment,
+)
+from uv_packsize.explanation import render_explained_analysis_report
+from uv_packsize.installed_metadata import (
+    InstalledMetadataAdapterError,
+    build_installed_dependency_graph,
 )
 from uv_packsize.inventory import InventoryError
 from uv_packsize.json_render import render_analysis_json
@@ -159,6 +165,19 @@ def _analysis_failure_message(error: Exception) -> str:
     raise TypeError("error must be an expected analysis failure")
 
 
+def _explanation_failure_message(error: Exception) -> str:
+    """Return a fixed public diagnostic for safe explanation failures.
+
+    Installed metadata and graph validation can carry untrusted package
+    metadata or filesystem details in their implementation exceptions.  The
+    CLI's opt-in presentation deliberately exposes neither.
+    """
+
+    if isinstance(error, (InstalledMetadataAdapterError, InventoryError, ValueError)):
+        return "Could not explain installed dependencies."
+    raise TypeError("error must be an expected explanation failure")
+
+
 @click.command()
 @click.version_option()
 @click.argument("package_names", nargs=-1, required=True)
@@ -179,12 +198,19 @@ def _analysis_failure_message(error: Exception) -> str:
     help="Write the versioned analysis result as JSON to stdout.",
 )
 @click.option(
+    "--explain",
+    is_flag=True,
+    help="Text output only: show installed-metadata dependency paths and attribution.",
+)
+@click.option(
     "-p",
     "--python",
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
-def cli(package_names, bin, json_output, allow_build, python_version):
+def cli(  # noqa: PLR0913
+    package_names, bin, json_output, explain, allow_build, python_version
+):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
         raise click.ClickException(
@@ -242,8 +268,21 @@ def cli(package_names, bin, json_output, allow_build, python_version):
         ) as error:
             raise click.ClickException(_analysis_failure_message(error)) from None
 
+        # JSON v1 remains a strict compatibility boundary.  In particular, do
+        # not inspect installed metadata when --explain is combined with JSON:
+        # this keeps stdout, stderr, and failures identical to --json alone.
         if json_output:
             click.echo(render_analysis_json(result), nl=False)
+        elif explain:
+            click.echo("Explaining dependencies...")
+            try:
+                graph = build_installed_dependency_graph(result, environment)
+                explained = explain_dependency_paths(result, graph)
+            except (InstalledMetadataAdapterError, InventoryError, ValueError) as error:
+                raise click.ClickException(
+                    _explanation_failure_message(error)
+                ) from None
+            click.echo(render_explained_analysis_report(explained, show_scripts=bin))
         else:
             click.echo(render_analysis_report(result, show_scripts=bin))
 

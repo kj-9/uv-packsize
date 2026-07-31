@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-02b2: `--explain` のCLI/README契約を接続する |
+| 次のタスク | P3-03: self/transitive totalとfile category別内訳のpolicyを設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | `--explain` public CLI/README contract |
+| 次の成果物 | self/transitive totalとfile category別内訳のpolicy |
 
 ## ステータス定義
 
@@ -217,7 +217,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `done` |
 | P3-02a | Phase 3 | dependency path/explanationのpure immutable resultを実装する | `done` |
 | P3-02b1 | Phase 3 | `--explain` のpure text presentationを実装する | `done` |
-| P3-02b2 | Phase 3 | `--explain` CLI/README契約を接続する | `todo` |
+| P3-02b2 | Phase 3 | `--explain` CLI/README契約を接続する | `done` |
 | P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
@@ -525,6 +525,29 @@ P2-06bの完了条件:
 引き継ぎ:
 
 - 次のタスクはP3-02b2とする。`build_installed_dependency_graph()`と`explain_dependency_paths()`のcomposition、CLI error mapping、`--explain` text-only option、README、`--json --explain`のv1 JSON不変、local wheel end-to-end coverageを扱う。
+
+### 2026-07-31: P3-02b2 `--explain` public CLI/README contract
+
+状態: `done`
+
+実装:
+
+- `--explain`をtext-only opt-inとしてCLIへ接続した。text modeだけで、測定済みの`InstalledEnvironment`からinstalled Core Metadata graphを構築し、dependency path explanationを既存reportの後ろへ表示する。`--bin --explain`も既存script presentationを維持する。
+- `--json --explain`はmetadata adapter、graph、explanation rendererを呼ばず、`--json`単独とstdout、stderr、exit behaviorがbyte-identicalになるよう固定した。schema v1には説明データを追加していない。
+- adapter境界とexplanation validationの既知の`ValueError`は固定されたsanitized Click errorへ変換する。`TypeError`などのprogrammer errorは握りつぶさない。metadata graphがincompleteでもsize reportはexit 0で、rendererはsafe warning codeと件数だけを表示する。
+- local wheelhouseの2 rootとshared dependencyを実installして、rootごとのpath、shared label、offline JSON `--explain` equalityを検証した。READMEにはinstalled Core Metadata由来でresolver provenanceではないこと、partial warning、JSON v1不変、root別byte attribution未実装を記載した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py` — 成功（49 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（382 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make verify-build` — explanationを含むwheel/sdist、artifact metadata、installed entry pointを検証して成功。
+
+引き継ぎ:
+
+- 次のタスクはP3-03とする。self/transitive totalとfile category別内訳のpolicyを、root別byte attributionとは分けて設計・実装する。
 
 ## 作業記録
 

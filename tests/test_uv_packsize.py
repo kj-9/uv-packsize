@@ -26,6 +26,10 @@ from uv_packsize.environment import (
     EnvironmentDiscoveryError,
     EnvironmentDiscoveryErrorCode,
 )
+from uv_packsize.installed_metadata import (
+    InstalledMetadataAdapterError,
+    InstalledMetadataAdapterErrorCode,
+)
 from uv_packsize.inventory import InventoryScanError, InventoryScanErrorCode
 from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy
@@ -331,6 +335,7 @@ def _run_local_layout(  # noqa: PLR0913
     *,
     show_scripts=False,
     json_output=False,
+    explain=False,
     allow_build=False,
 ):
     venv_path, python, _site_packages = installed_venv
@@ -364,6 +369,8 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.append("--bin")
     if json_output:
         arguments.append("--json")
+    if explain:
+        arguments.append("--explain")
     if allow_build:
         arguments.append("--allow-build")
     return CliRunner().invoke(cli, arguments)
@@ -527,6 +534,143 @@ def test_cli_json_is_repeatable_and_ignores_bin_presentation(
     assert default.stderr == repeated.stderr == with_bin.stderr
 
 
+def test_cli_json_ignores_explain_without_reading_installed_metadata(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    with_explain = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        explain=True,
+    )
+
+    assert default.exit_code == with_explain.exit_code == 0
+    assert default.stdout == with_explain.stdout
+    assert default.stderr == with_explain.stderr
+
+
+def test_cli_explain_renders_installed_metadata_attribution(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], explain=True
+    )
+
+    assert result.exit_code == 0
+    assert "Explaining dependencies..." in result.output
+    assert "--- Requested Roots ---" in result.output
+    assert "--- Dependency Attribution ---" in result.output
+    assert "--- Dependency Paths ---" in result.output
+    assert "1  sample  recognized" in result.output
+
+
+def test_cli_explain_reports_incomplete_metadata_graph_without_failing(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    (site_packages / "sample-1.0.dist-info" / "METADATA").unlink()
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], explain=True
+    )
+
+    assert result.exit_code == 0
+    assert (
+        "Warning: incomplete dependency graph (missing-metadata: 1)." in result.output
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        InstalledMetadataAdapterError(
+            InstalledMetadataAdapterErrorCode.CONTEXT_MISMATCH,
+            "/private/tmp/secret-environment",
+        ),
+        ValueError("secret requirement @ https://token@example.invalid/simple"),
+    ],
+)
+def test_cli_explain_sanitizes_expected_bridge_failures(
+    monkeypatch, installed_venv, failure
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["private @ https://token@example.invalid/simple"],
+        explain=True,
+    )
+
+    assert result.exit_code == 1
+    assert "Could not explain installed dependencies." in result.stderr
+    public_output = result.stdout + result.stderr
+    for unsafe_value in (
+        "secret-environment",
+        "secret requirement",
+        "token@example.invalid",
+        "Traceback",
+    ):
+        assert unsafe_value not in public_output
+
+
+def test_cli_explain_does_not_mask_programmer_errors(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    failure = TypeError("programmer bug")
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], explain=True
+    )
+
+    assert result.exit_code == 1
+    assert result.exception is failure
+
+
 def test_cli_help_describes_json_and_bin_interaction():
     result = CliRunner().invoke(cli, ["--help"])
 
@@ -535,6 +679,9 @@ def test_cli_help_describes_json_and_bin_interaction():
     assert "Write the versioned analysis result as JSON to stdout." in result.output
     assert "--bin" in result.output
     assert "Text output only:" in result.output
+    assert "--explain" in result.output
+    assert "installed-metadata dependency paths" in result.output
+    assert "attribution." in result.output
     assert "--allow-build" in result.output
     assert "Allow source builds during installation; disabled by" in result.output
     assert "default." in result.output

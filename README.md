@@ -47,6 +47,8 @@ Options:
   --allow-build      Allow source builds during installation; disabled by
                      default.
   --json             Write the versioned analysis result as JSON to stdout.
+  --explain          Text output only: show installed-metadata dependency paths
+                     and attribution.
   -p, --python TEXT  Specify the Python version for the virtual environment.
   --help             Show this message and exit.
 
@@ -126,6 +128,22 @@ exits with status 0; an operational failure exits with status 1 and leaves
 standard output empty; invalid command-line usage uses Click's status 2.
 `--bin` is a text-presentation option and has no effect on JSON bytes, so
 `--json --bin` is accepted but produces the same JSON as `--json`.
+`--explain` is also text-only: `--json --explain` is accepted and produces
+byte-identical output (including progress and errors) to `--json`, preserving
+the schema v1 compatibility boundary.
+
+### Dependency explanations
+
+Pass `--explain` with text output to append requested-root status, dependency
+attribution, and shortest installed dependency paths. The explanation is built
+from the installed distributions' Core Metadata after the size measurement; it
+is not a claim about resolver provenance. If installed metadata is missing,
+invalid, or otherwise incomplete, the command still reports the size and adds
+a sanitized graph-warning summary with warning-code counts.
+
+Dependency paths explain which roots reach an installed distribution, but this
+release does not assign a distribution's bytes (including shared dependency
+bytes) to individual roots. That byte-attribution policy is planned work.
 
 ## Measurement
 
@@ -169,9 +187,9 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 - Results depend on the selected Python version and platform, and on extras and
   dependency resolution. Compare results only when those conditions match.
 - Multiple requested packages are installed into one environment. The current
-  resolver normally installs a shared dependency once. The output does not
-  distinguish direct, transitive, or shared dependencies, or attribute a shared
-  dependency's size to individual root packages.
+  resolver normally installs a shared dependency once. `--explain` identifies
+  direct, transitive, and shared installed dependencies and their paths, but it
+  does not attribute their bytes to individual root packages.
 - Text output is intended for interactive use. For a versioned record with the
   measurement context needed for comparison, use `--json`.
 
