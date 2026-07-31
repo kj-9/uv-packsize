@@ -49,6 +49,8 @@ Options:
   --json             Write the versioned analysis result as JSON to stdout.
   --explain          Text output only: show installed-metadata dependency paths
                      and attribution.
+  --breakdown        Text output only: show global file-category and dependency-
+                     role sizes.
   -p, --python TEXT  Specify the Python version for the virtual environment.
   --help             Show this message and exit.
 
@@ -131,6 +133,8 @@ standard output empty; invalid command-line usage uses Click's status 2.
 `--explain` is also text-only: `--json --explain` is accepted and produces
 byte-identical output (including progress and errors) to `--json`, preserving
 the schema v1 compatibility boundary.
+`--breakdown` follows the same rule, including when combined with `--explain`:
+all `--json` combinations preserve the same schema v1 bytes as `--json` alone.
 
 ### Dependency explanations
 
@@ -144,6 +148,25 @@ a sanitized graph-warning summary with warning-code counts.
 Dependency paths explain which roots reach an installed distribution, but this
 release does not assign a distribution's bytes (including shared dependency
 bytes) to individual roots. That byte-attribution policy is planned work.
+
+### Global footprint breakdown
+
+Pass `--breakdown` with text output to append two global, deduplicated views of
+the measured inventory. File Category Breakdown always shows all six stable
+categories (`python`, `native`, `data`, `metadata`, `script`, and `other`),
+including zero-sized rows. Dependency Size Attribution classifies the same
+global bytes as `self`, `direct`, `transitive`, `unattributed`, or
+`mixed-ownership`; a file claimed by more than one distribution is still
+counted once globally.
+
+The role breakdown is derived from the same installed Core Metadata graph used
+by `--explain`, not from resolver provenance. If that graph is incomplete, the
+category breakdown remains available while dependency-role sizes are marked
+unavailable and a sanitized warning-code summary is shown. `--explain
+--breakdown` prints the normal report once, then dependency explanations and
+the footprint sections; any graph warning is shown once. JSON schema v1 is not
+extended by this opt-in text output. Per-requested-root byte allocation,
+including a policy for shared dependencies, remains planned work.
 
 ## Measurement
 
@@ -165,10 +188,10 @@ storage savings from hardlinks, clones, or similar sharing.
 
 The final `Total size` is derived from the included file inventory. If two
 distributions claim the same installed file, that file is counted once in the
-global total and the text report explains the difference from the distribution
-rows. Missing RECORD files, missing installed files, malformed metadata, and
-similar conditions produce an incomplete-analysis warning rather than being
-silently treated as a complete result.
+global total; `--breakdown` uses that same canonical global inventory rather
+than adding distribution rows together. Missing RECORD files, missing installed
+files, malformed metadata, and similar conditions produce an incomplete-analysis
+warning rather than being silently treated as a complete result.
 
 The total does not include:
 
@@ -189,7 +212,9 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 - Multiple requested packages are installed into one environment. The current
   resolver normally installs a shared dependency once. `--explain` identifies
   direct, transitive, and shared installed dependencies and their paths, but it
-  does not attribute their bytes to individual root packages.
+  does not attribute their bytes to individual root packages. `--breakdown`
+  instead describes global category and role totals; root-by-root byte
+  attribution is planned for Phase 3's later root-contribution work.
 - Text output is intended for interactive use. For a versioned record with the
   measurement context needed for comparison, use `--json`.
 

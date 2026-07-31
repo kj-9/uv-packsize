@@ -16,6 +16,8 @@ from pathlib import Path
 
 from local_wheel_factory import build_wheelhouse
 
+from uv_packsize.render import format_size
+
 PROJECT_ROOT = Path(__file__).parents[1]
 _ROOT_A = "uv-packsize-fixture-root-a"
 _ROOT_B = "uv-packsize-fixture-root-b"
@@ -127,6 +129,72 @@ def test_real_uv_install_from_local_wheels_explains_shared_dependency(tmp_path):
     assert completed.stderr == ""
 
 
+def test_real_uv_install_from_local_wheels_renders_global_breakdown(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    default = _run_cli(tmp_path, wheelhouse)
+    completed = _run_cli(tmp_path, wheelhouse, "--breakdown")
+    with_scripts = _run_cli(tmp_path, wheelhouse, "--breakdown", "--bin")
+    raw_result = json.loads(_run_cli(tmp_path, wheelhouse, "--json").stdout)
+
+    category_totals = {
+        category: sum(
+            file["logical_bytes"]
+            for distribution in raw_result["distributions"]
+            for file in distribution["files"]
+            if file["category"] == category
+        )
+        for category in ("python", "native", "data", "metadata", "script", "other")
+    }
+    shared_total = next(
+        distribution["totals"]["logical_bytes"]
+        for distribution in raw_result["distributions"]
+        if distribution["name"] == _SHARED
+    )
+    global_total = raw_result["totals"]["global_logical_bytes"]
+
+    assert default.returncode == completed.returncode == with_scripts.returncode == 0
+    assert _reported_total(default.stdout) == _reported_total(completed.stdout)
+    assert _reported_total(completed.stdout) == _reported_total(with_scripts.stdout)
+    assert _table_rows(completed.stdout, "File Category Breakdown") == {
+        category: format_size(total) for category, total in category_totals.items()
+    }
+    assert _table_footer(completed.stdout, "File Category Breakdown") == format_size(
+        global_total
+    )
+    role_rows = _table_rows(completed.stdout, "Dependency Size Attribution")
+    assert set(role_rows) == {
+        "self",
+        "direct",
+        "transitive",
+        "unattributed",
+        "mixed-ownership",
+    }
+    assert role_rows["direct"] == format_size(shared_total)
+    assert _table_footer(
+        completed.stdout, "Dependency Size Attribution"
+    ) == format_size(global_total)
+    assert "Binaries in .venv/bin" in with_scripts.stdout
+    assert completed.stderr == with_scripts.stderr == ""
+
+
+def test_real_uv_install_from_local_wheels_combines_explanation_and_breakdown(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    completed = _run_cli(tmp_path, wheelhouse, "--explain", "--breakdown")
+
+    assert completed.returncode == 0
+    assert completed.stdout.index("--- Requested Roots ---") < completed.stdout.index(
+        "--- File Category Breakdown ---"
+    )
+    assert completed.stdout.index("--- Dependency Paths ---") < completed.stdout.index(
+        "--- Dependency Size Attribution ---"
+    )
+    assert completed.stderr == ""
+
+
 def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
@@ -188,16 +256,27 @@ def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_pat
     }
 
 
-def test_real_uv_install_from_local_wheels_json_explain_is_byte_identical(tmp_path):
+def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
+    tmp_path,
+):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
 
     default = _run_cli(tmp_path, wheelhouse, "--json")
-    with_explain = _run_cli(tmp_path, wheelhouse, "--json", "--explain")
+    for options in (
+        ("--bin",),
+        ("--explain",),
+        ("--breakdown",),
+        ("--bin", "--explain"),
+        ("--bin", "--breakdown"),
+        ("--explain", "--breakdown"),
+        ("--bin", "--explain", "--breakdown"),
+    ):
+        with_text_option = _run_cli(tmp_path, wheelhouse, "--json", *options)
 
-    assert default.returncode == with_explain.returncode == 0
-    assert default.stdout == with_explain.stdout
-    assert default.stderr == with_explain.stderr
+        assert default.returncode == with_text_option.returncode == 0
+        assert default.stdout == with_text_option.stdout
+        assert default.stderr == with_text_option.stderr
 
 
 def _run_cli(
@@ -269,18 +348,31 @@ def _integration_environment(tmp_path: Path, wheelhouse: Path) -> dict[str, str]
 
 
 def _table_names(output: str, title: str) -> set[str]:
-    section = output.split(f"--- {title} ---\n", maxsplit=1)[1].split(
-        "\n\n", maxsplit=1
-    )[0]
+    return set(_table_rows(output, title))
+
+
+def _table_rows(output: str, title: str) -> dict[str, str]:
+    section = _table_section(output, title)
     lines = section.splitlines()
     separator_indexes = [
         index for index, line in enumerate(lines) if re.fullmatch(r"-+(?:  -+)?", line)
     ]
     assert len(separator_indexes) == 2
     return {
-        line.rsplit("  ", maxsplit=1)[0].strip()
+        name.strip(): size.strip()
         for line in lines[separator_indexes[0] + 1 : separator_indexes[1]]
+        for name, size in (line.rsplit("  ", maxsplit=1),)
     }
+
+
+def _table_footer(output: str, title: str) -> str:
+    return _table_section(output, title).splitlines()[-1].rsplit("  ", maxsplit=1)[1]
+
+
+def _table_section(output: str, title: str) -> str:
+    return output.split(f"--- {title} ---\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[
+        0
+    ]
 
 
 def _reported_total(output: str) -> str:

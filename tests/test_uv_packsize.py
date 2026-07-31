@@ -336,6 +336,7 @@ def _run_local_layout(  # noqa: PLR0913
     show_scripts=False,
     json_output=False,
     explain=False,
+    breakdown=False,
     allow_build=False,
 ):
     venv_path, python, _site_packages = installed_venv
@@ -371,6 +372,8 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.append("--json")
     if explain:
         arguments.append("--explain")
+    if breakdown:
+        arguments.append("--breakdown")
     if allow_build:
         arguments.append("--allow-build")
     return CliRunner().invoke(cli, arguments)
@@ -547,6 +550,10 @@ def test_cli_json_ignores_explain_without_reading_installed_metadata(
         "uv_packsize.cli.build_installed_dependency_graph",
         lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
     )
+    monkeypatch.setattr(
+        "uv_packsize.cli.summarize_footprint",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
 
     default = _run_local_layout(
         monkeypatch, installed_venv, ["sample==1.0"], json_output=True
@@ -562,6 +569,121 @@ def test_cli_json_ignores_explain_without_reading_installed_metadata(
     assert default.exit_code == with_explain.exit_code == 0
     assert default.stdout == with_explain.stdout
     assert default.stderr == with_explain.stderr
+
+
+def test_cli_json_ignores_all_text_only_options_without_reading_metadata(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.summarize_footprint",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    for options in ({"breakdown": True}, {"explain": True, "breakdown": True}):
+        text_options = _run_local_layout(
+            monkeypatch,
+            installed_venv,
+            ["sample==1.0"],
+            json_output=True,
+            **options,
+        )
+        assert text_options.exit_code == default.exit_code == 0
+        assert text_options.stdout == default.stdout
+        assert text_options.stderr == default.stderr
+
+
+def test_cli_breakdown_does_not_sanitize_footprint_invariant_errors(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    failure = ValueError("footprint invariant failure")
+    monkeypatch.setattr(
+        "uv_packsize.cli.summarize_footprint",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], breakdown=True
+    )
+
+    assert result.exit_code == 1
+    assert result.exception is failure
+    assert "Could not explain installed dependencies." not in result.output
+
+
+def test_cli_breakdown_renders_categories_and_roles_once(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    calls = []
+    original = __import__(
+        "uv_packsize.cli", fromlist=["build_installed_dependency_graph"]
+    ).build_installed_dependency_graph
+
+    def build_once(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr("uv_packsize.cli.build_installed_dependency_graph", build_once)
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], breakdown=True
+    )
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert "Explaining dependencies..." not in result.output
+    assert "--- File Category Breakdown ---" in result.output
+    assert "--- Dependency Size Attribution ---" in result.output
+    assert "self" in result.output
+    assert _reported_total(result.output) in result.output
+
+
+def test_cli_explain_and_breakdown_composes_sections_without_duplicate_warning(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+    )
+    (site_packages / "sample-1.0.dist-info" / "METADATA").unlink()
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+    )
+
+    assert result.exit_code == 0
+    assert "Explaining dependencies..." in result.output
+    assert "--- Requested Roots ---" in result.output
+    assert "--- File Category Breakdown ---" in result.output
+    assert "Unavailable: incomplete dependency graph." in result.output
+    assert result.output.count("Warning: incomplete dependency graph") == 1
 
 
 def test_cli_explain_renders_installed_metadata_attribution(
@@ -682,6 +804,9 @@ def test_cli_help_describes_json_and_bin_interaction():
     assert "--explain" in result.output
     assert "installed-metadata dependency paths" in result.output
     assert "attribution." in result.output
+    assert "--breakdown" in result.output
+    assert "global file-category and dependency-" in result.output
+    assert "role sizes." in result.output
     assert "--allow-build" in result.output
     assert "Allow source builds during installation; disabled by" in result.output
     assert "default." in result.output

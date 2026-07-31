@@ -18,6 +18,11 @@ from uv_packsize.environment import (
     discover_installed_environment,
 )
 from uv_packsize.explanation import render_explained_analysis_report
+from uv_packsize.footprint import summarize_footprint
+from uv_packsize.footprint_render import (
+    render_footprint_report,
+    render_footprint_sections,
+)
 from uv_packsize.installed_metadata import (
     InstalledMetadataAdapterError,
     build_installed_dependency_graph,
@@ -203,13 +208,18 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Text output only: show installed-metadata dependency paths and attribution.",
 )
 @click.option(
+    "--breakdown",
+    is_flag=True,
+    help="Text output only: show global file-category and dependency-role sizes.",
+)
+@click.option(
     "-p",
     "--python",
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
 def cli(  # noqa: PLR0913
-    package_names, bin, json_output, explain, allow_build, python_version
+    package_names, bin, json_output, explain, breakdown, allow_build, python_version
 ):
     """Report the size of a Python package and its dependencies using uv."""
     if not shutil.which("uv"):
@@ -269,12 +279,14 @@ def cli(  # noqa: PLR0913
             raise click.ClickException(_analysis_failure_message(error)) from None
 
         # JSON v1 remains a strict compatibility boundary.  In particular, do
-        # not inspect installed metadata when --explain is combined with JSON:
-        # this keeps stdout, stderr, and failures identical to --json alone.
+        # not inspect installed metadata when text-only options are combined
+        # with JSON: this keeps stdout, stderr, and failures identical to
+        # --json alone.
         if json_output:
             click.echo(render_analysis_json(result), nl=False)
-        elif explain:
-            click.echo("Explaining dependencies...")
+        elif explain or breakdown:
+            if explain:
+                click.echo("Explaining dependencies...")
             try:
                 graph = build_installed_dependency_graph(result, environment)
                 explained = explain_dependency_paths(result, graph)
@@ -282,7 +294,26 @@ def cli(  # noqa: PLR0913
                 raise click.ClickException(
                     _explanation_failure_message(error)
                 ) from None
-            click.echo(render_explained_analysis_report(explained, show_scripts=bin))
+            # Footprint aggregation is an internal invariant boundary, not an
+            # installed-metadata adapter boundary.  Do not turn its failures
+            # into a sanitized user-facing metadata error.
+            footprint = summarize_footprint(explained) if breakdown else None
+            if explain and breakdown:
+                explanation = render_explained_analysis_report(
+                    explained, show_scripts=bin
+                )
+                assert footprint is not None
+                footprint_sections = render_footprint_sections(
+                    footprint, include_graph_warning_summary=False
+                )
+                click.echo("\n\n".join((explanation, *footprint_sections)))
+            elif explain:
+                click.echo(
+                    render_explained_analysis_report(explained, show_scripts=bin)
+                )
+            else:
+                assert footprint is not None
+                click.echo(render_footprint_report(footprint, show_scripts=bin))
         else:
             click.echo(render_analysis_report(result, show_scripts=bin))
 

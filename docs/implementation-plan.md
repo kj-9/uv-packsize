@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-03b: footprint resultのpure text presentationを実装する |
+| 次のタスク | P3-04: 既存virtual environmentまたはprefixを分析する入力modeを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | footprint resultのpure text presentation |
+| 次の成果物 | existing environment/prefix input modeの設計 |
 
 ## ステータス定義
 
@@ -219,8 +219,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-02b1 | Phase 3 | `--explain` のpure text presentationを実装する | `done` |
 | P3-02b2 | Phase 3 | `--explain` CLI/README契約を接続する | `done` |
 | P3-03a | Phase 3 | global dedupeを保つpure footprint aggregationを実装する | `done` |
-| P3-03b | Phase 3 | footprint resultのpure text presentationを実装する | `todo` |
-| P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `todo` |
+| P3-03b | Phase 3 | footprint resultのpure text presentationを実装する | `done` |
+| P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `done` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -571,6 +571,50 @@ P2-06bの完了条件:
 - rootでもあるdistributionは`self`であり、root別の容量寄与はP3-05まで主張しない。
 
 ## 作業記録
+
+### 2026-07-31: P3-03c footprint presentation public CLI/README contract
+
+状態: `done`
+
+実装:
+
+- `--breakdown`をtext-only opt-inとしてCLIへ接続した。text modeでは、測定済みの`InstalledEnvironment`からinstalled Core Metadata graphを一度だけ構築し、dependency path explanationとglobal footprint resultを順に導出する。breakdown単独は既存reportをbyte-identical prefixにしてFile Category BreakdownとDependency Size Attributionを追加する。
+- `--explain --breakdown`は通常reportを一度だけ表示した後に既存のdependency explanation section、footprint sectionの順で合成する。incomplete graph時のsafe warning code/count summaryは一度だけ表示し、category totalは維持しつつdependency role totalをunavailableと明示する。
+- JSON schema v1は互換境界のままにした。`--json --breakdown`および`--json --explain --breakdown`はinstalled metadata、graph、footprint aggregationを呼ばず、`--json`単独とstdout、stderr、exit behaviorがbyte-identicalである。
+- READMEにcanonical global dedupe、6 file category、dependency role/mixed ownership、incomplete graph時のavailability、installed Core Metadata basis、JSON v1不変、P3-05で扱うroot別byte配賦の境界を記載した。
+- local wheelhouseの実installでcategory/role table、shared direct dependencyが一度だけ分類されること、`--bin`のtotal不変、explanationとのsection合成、JSON text-option combinationsのbyte equalityを検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py tests/test_footprint_render.py -q` — 成功（66 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（409 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- P3-03は完了。次のタスクはP3-04とし、既存virtual environmentまたはprefixを安全に分析する入力modeを設計する。
+
+### 2026-07-31: P3-03b footprint result pure text presentation
+
+状態: `done`
+
+実装:
+
+- [`uv_packsize/footprint_render.py`](../uv_packsize/footprint_render.py)に、既存`render_analysis_report()`をbyte-identical prefixとして維持した`render_footprint_report()`と、将来のopt-in composer用のsection-only APIを追加した。`--bin`相当のprefix表示は変えず、global-deduplicated footprint totalは常に不変とする。
+- File Category Breakdownは`FileCategory` enum順の全6行をzero rowを含めて表示し、Dependency Size Attributionはgraph complete時だけ`self`、`direct`、`transitive`、`unattributed`、`mixed-ownership`の固定順とglobal totalを表示する。両sectionは既存`format_size()`のbinary unit表記を再利用する。
+- graph incomplete時のdependency size attributionは数値を表示せず、availability文とsafe warning code/countだけを表示する。section-only APIはwarning summaryの包含を制御できるため、P3-03cで`--explain`と合成してもgraph warningを重複させない。
+- [`tests/test_footprint_render.py`](../tests/test_footprint_render.py)でprefix完全一致、enum/role順、zero row、empty、`--bin`不変、incomplete graphのsanitization、warning summary composition、型検証を追加し、artifact verifierにrendererをcritical moduleとして追加した。CLI、README、explanation renderer、JSON schema v1は変更していない。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_footprint_render.py -q` — 成功（11 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format --check uv_packsize/footprint_render.py tests/test_footprint_render.py`、`uv run --locked ruff check uv_packsize/footprint_render.py tests/test_footprint_render.py`、`uv run --locked ty check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（403 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointに`footprint_render.py`を含むことを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-03cとする。footprint presentationをtext-only opt-in CLI/README契約へ接続し、`--explain`とのwarning summary重複がないこと、JSON schema v1不変、local wheel end-to-endを検証する。
 
 ### 2026-07-31: P3-03a global footprint aggregation
 
