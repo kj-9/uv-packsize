@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-02a: diff text renderer（CLI未接続）を実装する |
+| 次のタスク | P4-02b: compare CLI/read boundaryを小単位で設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-02a: diff text renderer（CLI未接続） |
+| 次の成果物 | P4-02b: compare CLI/read boundary |
 
 ## ステータス定義
 
@@ -231,7 +231,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `done` |
 | P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `done` |
 | P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `done` |
-| P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `todo` |
+| P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `done` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -769,6 +769,33 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP4-02aとする。`AnalysisDiff`のpure text rendererを追加し、CLI、JSON schema、baseline file I/O、budget policyには接続しない。
+
+### 2026-07-31: P4-02a pure diff text renderer
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/diff_render.py`に、I/O、比較可否判定、CLIを持たない`AnalysisDiff`専用の`render_diff_report()`とsection APIを追加した。global logical sizeを先頭のcanonical metricとしてbaseline/current/signed changeで表示し、distribution-owned aggregateは別metricとして明示する。
+- `format_signed_size()`はboolを拒否するbounded signed integer専用formatとし、absolute valueには既存`format_size()`を再利用する。zeroは`0 B`、非zeroは`+`/`-`を付け、既存size formatterの契約は変更していない。
+- distributionはcanonical name順でadded、removed、changedに分ける。version changeに加えてkindがunchangedでもbytes deltaを持つrowをchangedとし、完全不変rowは出力しない。Changed tableは表示上の意味を明確にする`Change type`列を持ち、size-only、version-only、両方を`size`、`version`、`version+size`として出す。変化がない場合は固定の`No distribution changes.` sectionを出す。
+- incomplete comparisonではbaselineからcurrentの固定順でwarning code/countだけを表示し、partial deltaであることを明記する。global deltaとdistribution aggregate deltaが異なる場合だけ、duplicate-owned filesがdistribution totalsでは重複し得る一方globalはcanonical identityを一度だけ数えるため非reconciliationとなる安全なnoteを表示する。
+- distribution name/versionはUnicode C categoryを`?`へ置換し、それ以外のnon-ASCIIは固定幅ASCII Unicode escapeへ正規化する。これによりテーブルの`len`幅と端末表示幅を一致させる。baseline repr、fingerprint、target/path/requirementはrendererから参照しない。artifact verifierに新rendererをcritical moduleとして追加した。
+
+テスト:
+
+- `tests/test_diff_render.py`でsigned sizeのzero、正負、unit境界、最大値、bool/range rejection、empty/add/remove/version-only/size-only/both changeと3種のexact change type、canonical ordering、aggregate nonreconciliation、incomplete warning code/count順序、zero-distribution baseline、private context fingerprint/repr非表示、ASCII escape化した全角/combining/emoji/bidi/control、安全なtable alignment、wrong type、section/report等価性を検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_diff_render.py -q` — 成功（33 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（625 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP4-02bとする。baseline read/compare error boundaryとCLI表示を小単位で接続する。JSON schema、budget policy、baseline書込みは別taskとして扱う。
 
 ## 作業記録
 

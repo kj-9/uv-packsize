@@ -19,6 +19,7 @@ CRITICAL_MODULES = {
     "uv_packsize/__main__.py",
     "uv_packsize/baseline.py",
     "uv_packsize/diff.py",
+    "uv_packsize/diff_render.py",
     "uv_packsize/cli.py",
     "uv_packsize/dependency_graph.py",
     "uv_packsize/dependency_paths.py",
