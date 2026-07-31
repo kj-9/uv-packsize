@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-02b: `--explain` text表示をpure resultへ接続する |
+| 次のタスク | P3-02b2: `--explain` のCLI/README契約を接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | `--explain` text presentation |
+| 次の成果物 | `--explain` public CLI/README contract |
 
 ## ステータス定義
 
@@ -216,7 +216,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-01a | Phase 3 | installed metadata dependency graphのpure coreを実装する | `done` |
 | P3-01b | Phase 3 | installed Core Metadata adapterをgraph coreへ接続する | `done` |
 | P3-02a | Phase 3 | dependency path/explanationのpure immutable resultを実装する | `done` |
-| P3-02b | Phase 3 | `--explain` text表示をpure resultへ接続する | `todo` |
+| P3-02b1 | Phase 3 | `--explain` のpure text presentationを実装する | `done` |
+| P3-02b2 | Phase 3 | `--explain` CLI/README契約を接続する | `todo` |
 | P3-03 | Phase 3 | self/transitive totalとfile category別内訳のpolicyを設計・実装する | `todo` |
 | P3-04 | Phase 3 | 既存virtual environmentまたはprefixを分析する入力modeを設計する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
@@ -496,6 +497,34 @@ P2-06bの完了条件:
 スコープ境界:
 
 - public text契約、CLI option、rendererの設計とテストはこのtaskで扱う。schema v1 JSONは互換境界として変更しない。
+
+分割:
+
+- P3-02b1では、`ExplainedAnalysisResult`だけを入力に、通常のtext reportをbyte-identical prefixとして保ったpure explanation rendererを実装する。root inputごとのpathを表示できるよう、説明モデルにはroot inputごとのshortest path集合を保持する。CLI、README、JSON schemaは変更しない。
+- P3-02b2では、installed environmentからmetadata graph、説明result、CLI error mappingまでのadapter境界と`--explain` public contractを接続する。`--json --explain`のv1 JSON互換性とend-to-end local wheel coverageはこのtaskで検証する。
+
+### 2026-07-31: P3-02b1 pure explanation presentation
+
+状態: `done`
+
+実装:
+
+- `DistributionAttribution`は、canonical pathに加えてroot inputごとのdeterministic shortest path集合をimmutableに保持し、root input indexes、終端node、canonical pathとの整合を検証するようにした。同名のroot inputも別pathとして残る。
+- `uv_packsize/explanation.py`に、既存`render_analysis_report()`の結果をbyte-identical prefixにし、Requested Roots、Dependency Attribution、Dependency Pathsを後置するpure rendererを追加した。path sectionはroot自身のzero-hop pathを表示せず、recognized root inputと到達nodeごとに1本だけをdeterministicに表示する。
+- dependency graphがincompleteの場合は、warning targetやraw metadata/requirement/diagnosticを出さず、warning codeと件数だけをsanitized summaryとして表示する。inventoryのincomplete warningは既存prefixの意味を維持し、graph completenessとは混同しない。
+- renderer、path model、cycle/shared/duplicate root/unattributed/sanitized warning/prefix不変のunit testを追加し、artifact verifierは新renderer moduleのwheel/sdist含有を確認する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_dependency_paths.py tests/test_explanation.py tests/test_render.py` — 成功（33 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（374 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make verify-build` — explanation rendererを含むwheel/sdist、artifact metadata、installed entry pointを検証して成功。
+
+引き継ぎ:
+
+- 次のタスクはP3-02b2とする。`build_installed_dependency_graph()`と`explain_dependency_paths()`のcomposition、CLI error mapping、`--explain` text-only option、README、`--json --explain`のv1 JSON不変、local wheel end-to-end coverageを扱う。
 
 ## 作業記録
 

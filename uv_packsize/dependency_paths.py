@@ -67,11 +67,12 @@ class DependencyPath:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DistributionAttribution:
-    """One graph node with root-input reachability and a canonical path."""
+    """One graph node with root-input reachability and deterministic paths."""
 
     node: DependencyGraphNode
     root_input_indexes: tuple[int, ...]
     canonical_path: DependencyPath | None
+    paths: tuple[DependencyPath, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.node, DependencyGraphNode):
@@ -82,15 +83,29 @@ class DistributionAttribution:
             self.canonical_path, DependencyPath
         ):
             raise TypeError("canonical_path must be a DependencyPath or None")
-        if bool(indexes) != (self.canonical_path is not None):
-            raise ValueError(
-                "canonical_path must exist exactly when roots reach a node"
-            )
-        if (
-            self.canonical_path is not None
-            and self.canonical_path.root_input_index not in indexes
-        ):
-            raise ValueError("canonical_path root_input_index must be reachable")
+        paths = tuple(self.paths)
+        if any(not isinstance(path, DependencyPath) for path in paths):
+            raise TypeError("paths must contain DependencyPath values")
+        # Retain a small constructor compatibility boundary for callers that
+        # used the P3-02a canonical-path-only model.  An explained result still
+        # verifies the complete set of root paths against the graph below.
+        if not paths and self.canonical_path is not None:
+            paths = (self.canonical_path,)
+        if len(paths) != len(set(paths)):
+            raise ValueError("paths must not contain duplicates")
+        paths = tuple(sorted(paths, key=_path_key))
+        if bool(indexes) != bool(paths):
+            raise ValueError("paths must exist exactly when roots reach a node")
+        if indexes != tuple(sorted({path.root_input_index for path in paths})):
+            raise ValueError("paths must match reachable root input indexes")
+        if len(paths) != len(indexes):
+            raise ValueError("paths must contain one path per reachable root input")
+        if any(path.nodes[-1] != self.node.name for path in paths):
+            raise ValueError("paths must terminate at the attributed node")
+        expected_canonical = min(paths, key=_path_key) if paths else None
+        if self.canonical_path != expected_canonical:
+            raise ValueError("canonical_path must be the deterministic first path")
+        object.__setattr__(self, "paths", paths)
 
 
 def _path_key(path: DependencyPath) -> tuple[int, int, tuple[str, ...]]:
@@ -257,6 +272,7 @@ def _derived_attributions(
             canonical_path=(
                 min(paths_by_node[name], key=_path_key) if paths_by_node[name] else None
             ),
+            paths=tuple(sorted(paths_by_node[name], key=_path_key)),
         )
         for name, node in sorted(nodes.items())
     )

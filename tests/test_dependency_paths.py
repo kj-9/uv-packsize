@@ -116,6 +116,9 @@ def test_cycle_paths_are_simple_shortest_and_canonical():
     assert by_name(explained)["b"].canonical_path == DependencyPath(
         root_input_index=0, nodes=("root", "a", "b")
     )
+    assert by_name(explained)["b"].paths == (
+        DependencyPath(root_input_index=0, nodes=("root", "a", "b")),
+    )
     assert explained.attributions[0].node.name == "a"
 
 
@@ -160,6 +163,10 @@ def test_shared_reachability_keeps_each_root_input_and_selects_canonical_path():
     assert shared.canonical_path == DependencyPath(
         root_input_index=0, nodes=("root-b", "shared")
     )
+    assert shared.paths == (
+        DependencyPath(root_input_index=0, nodes=("root-b", "shared")),
+        DependencyPath(root_input_index=1, nodes=("root-a", "shared")),
+    )
     assert shared.node.is_shared is True
 
 
@@ -172,6 +179,10 @@ def test_duplicate_root_inputs_are_retained_without_changing_graph_shared_status
 
     child = by_name(explained)["child"]
     assert child.root_input_indexes == (0, 1)
+    assert child.paths == (
+        DependencyPath(root_input_index=0, nodes=("root", "child")),
+        DependencyPath(root_input_index=1, nodes=("root", "child")),
+    )
     assert child.node.root_names == ("root",)
     assert child.node.is_shared is False
 
@@ -222,6 +233,7 @@ def test_unattributed_distribution_has_no_path_or_root_indexes():
     orphan = by_name(explained)["orphan"]
     assert orphan.root_input_indexes == ()
     assert orphan.canonical_path is None
+    assert orphan.paths == ()
 
 
 def test_component_completeness_remains_separate_from_combined_completeness():
@@ -398,12 +410,26 @@ def test_models_reject_malformed_paths_and_result_rejects_non_edge_unknown_paths
         ("orphan", "1", ()),
     )
     valid = explain_dependency_paths(result, dependency_graph)
-    root = by_name(valid)["root"]
+    child = by_name(valid)["child"]
     orphan = by_name(valid)["orphan"]
+    with pytest.raises(ValueError, match="one path per reachable root input"):
+        DistributionAttribution(
+            node=child.node,
+            root_input_indexes=(0,),
+            canonical_path=DependencyPath(root_input_index=0, nodes=("root", "child")),
+            paths=(
+                DependencyPath(root_input_index=0, nodes=("root", "child")),
+                DependencyPath(
+                    root_input_index=0, nodes=("root", "alternate", "child")
+                ),
+            ),
+        )
     unknown = DistributionAttribution(
-        node=root.node,
+        node=child.node,
         root_input_indexes=(0,),
-        canonical_path=DependencyPath(root_input_index=0, nodes=("root", "unknown")),
+        canonical_path=DependencyPath(
+            root_input_index=0, nodes=("root", "unknown", "child")
+        ),
     )
     non_edge = DistributionAttribution(
         node=orphan.node,
