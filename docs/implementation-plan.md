@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-04a2: existing-prefix用JSON schema v2を設計・実装する |
+| 次のタスク | P3-04b: existing prefixのlayout/context discovery adapterを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -222,7 +222,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-03b | Phase 3 | footprint resultのpure text presentationを実装する | `done` |
 | P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `done` |
 | P3-04a1 | Phase 3 | existing-prefix context modelと既存schema v1互換境界を実装する | `done` |
-| P3-04a2 | Phase 3 | existing-prefix用JSON schema v2を設計・実装する | `todo` |
+| P3-04a2 | Phase 3 | existing-prefix用JSON schema v2を設計・実装する | `done` |
 | P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `todo` |
 | P3-04c | Phase 3 | prefix CLI/README契約とend-to-end検証を接続する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
@@ -594,6 +594,27 @@ P2-06bの完了条件:
 - JSON schema v1と既存のresolution-based text/JSON出力はbyte-compatibleに維持する。existing prefix結果はv2以降の明示的schemaでだけ機械可読に表現する。
 
 ## 作業記録
+
+### 2026-07-31: P3-04a2 existing-prefix JSON schema v2
+
+状態: `done`
+
+実装:
+
+- `ExistingPrefixContext`専用の閉じたJSON schema v2とpure serializerを追加した。v2 contextは`input_kind: existing-prefix`、空のrequirements/extras/index identifiers、観測済みまたは`null`のPython/platform/architecture、path/case semantics、および未観測・非該当を明示する固定`null` fieldsだけを出力する。raw prefix、site-packages、venv、executable、configuration、credentialは出力しない。
+- `analysis_result_to_json_object()`と`render_analysis_json()`に明示的な`schema_version` selectorを追加した。default v1のobject/bytesは不変であり、v1は`ResolutionContext`、v2は`ExistingPrefixContext`以外を明示的な`TypeError`で拒否する。boolおよび未対応versionも拒否する。
+- v2 schemaはv1を参照しないself-containedな定義とし、measurement、distribution/file、warning、duplicate ownership、completeness、totalの契約をv1と同じに保った。既存prefix golden、known/null observation、selector/context family rejection、permutation、v1 byte compatibility、閉じたschemaとunsafe field不在をテストした。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_json_render.py -q` — 成功（49 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（456 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-04bとする。existing prefixのlayoutと安全な観測contextを、対象Pythonを実行せずread-onlyに収集するadapterを実装する。
 
 ### 2026-07-31: P3-04a1 existing-prefix context model
 

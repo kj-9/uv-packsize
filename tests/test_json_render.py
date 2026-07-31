@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -137,6 +138,24 @@ def golden_result(*, reverse: bool = False) -> AnalysisResult:
     )
 
 
+def existing_prefix_result(
+    *, reverse: bool = False, **overrides: Any
+) -> AnalysisResult:
+    values: dict[str, Any] = {
+        "path_flavor": PathFlavor.POSIX,
+        "case_rule": CaseRule.SENSITIVE,
+        "python_version": "3.13.2",
+        "platform": "macosx",
+        "architecture": None,
+    }
+    values.update(overrides)
+    source = golden_result(reverse=reverse)
+    return AnalysisResult(
+        context=ExistingPrefixContext(**values),
+        distributions=source.distributions,
+    )
+
+
 def test_render_analysis_json_matches_committed_v1_golden():
     expected = (_ROOT / "tests/golden/analysis-result-v1.json").read_text()
 
@@ -145,10 +164,57 @@ def test_render_analysis_json_matches_committed_v1_golden():
     assert not expected.endswith("\n\n")
 
 
+def test_render_analysis_json_matches_committed_v2_existing_prefix_golden():
+    expected = (
+        _ROOT / "tests/golden/analysis-result-v2-existing-prefix.json"
+    ).read_text()
+
+    empty_result = AnalysisResult(
+        context=existing_prefix_result().context,
+        distributions=(),
+    )
+    assert render_analysis_json(empty_result, schema_version=2) == expected
+    assert expected.endswith("\n")
+    assert not expected.endswith("\n\n")
+
+
+def test_existing_prefix_json_preserves_known_and_unknown_observations():
+    document = analysis_result_to_json_object(
+        existing_prefix_result(
+            python_version=None,
+            platform="linux-x86_64",
+            architecture="x86_64",
+        ),
+        schema_version=2,
+    )
+
+    assert document["context"] == {
+        "input_kind": "existing-prefix",
+        "requirements": [],
+        "python_version": None,
+        "platform": "linux-x86_64",
+        "architecture": "x86_64",
+        "path_flavor": "posix",
+        "case_rule": "sensitive",
+        "uv_version": None,
+        "build_policy": None,
+        "compile_bytecode": None,
+        "extras": [],
+        "index_identifiers": [],
+        "resolution_strategy": None,
+    }
+
+
 def test_json_is_byte_stable_for_model_input_permutations():
     assert render_analysis_json(golden_result()) == render_analysis_json(
         golden_result(reverse=True)
     )
+
+
+def test_schema_v2_is_byte_stable_for_model_input_permutations():
+    assert render_analysis_json(
+        existing_prefix_result(), schema_version=2
+    ) == render_analysis_json(existing_prefix_result(reverse=True), schema_version=2)
 
 
 def test_json_represents_empty_results_and_derived_totals():
@@ -480,6 +546,71 @@ def test_committed_schema_is_closed_and_matches_the_v1_golden_shape():
     ]
 
 
+def test_committed_v2_schema_is_closed_self_contained_and_matches_golden_shape():
+    schema_path = _ROOT / "schemas/analysis-result-v2.schema.json"
+    schema = json.loads(schema_path.read_text())
+    golden = json.loads(
+        (_ROOT / "tests/golden/analysis-result-v2-existing-prefix.json").read_text()
+    )
+
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == list(golden)
+    assert set(schema["properties"]) == set(golden)
+    assert schema["properties"]["schema_version"] == {"const": 2}
+    assert "analysis-result-v1" not in schema_path.read_text()
+    context_schema = schema["$defs"]["context"]
+    assert context_schema["additionalProperties"] is False
+    assert context_schema["properties"]["input_kind"] == {"const": "existing-prefix"}
+    assert context_schema["properties"]["requirements"] == {
+        "type": "array",
+        "maxItems": 0,
+    }
+    assert context_schema["properties"]["extras"] == {
+        "type": "array",
+        "maxItems": 0,
+    }
+    safe_observation = schema["$defs"]["safeObservation"]
+    assert safe_observation["type"] == "string"
+    assert safe_observation["minLength"] == 1
+    observation_pattern = re.compile(safe_observation["pattern"])
+    for field_name in ("python_version", "platform", "architecture"):
+        assert context_schema["properties"][field_name] == {
+            "anyOf": [
+                {"$ref": "#/$defs/safeObservation"},
+                {"type": "null"},
+            ]
+        }
+    for value in ("3.13.2", "manylinux_2_28_x86_64", "arm64", "glibc 2.39"):
+        assert observation_pattern.fullmatch(value)
+    for value in (
+        "/private/prefix",
+        "prefix\\site-packages",
+        "~/.venv",
+        "C:relative-prefix",
+        "C:\\absolute-prefix",
+        " leading",
+        "trailing ",
+        "unsafe\0observation",
+    ):
+        assert observation_pattern.fullmatch(value) is None
+    for field_name in (
+        "uv_version",
+        "build_policy",
+        "compile_bytecode",
+        "resolution_strategy",
+    ):
+        assert context_schema["properties"][field_name] == {"const": None}
+    for unsafe_field in (
+        "prefix",
+        "site_packages",
+        "venv",
+        "executable",
+        "config",
+        "credentials",
+    ):
+        assert unsafe_field not in context_schema["properties"]
+
+
 def test_json_renderer_requires_an_analysis_result():
     with pytest.raises(TypeError, match="AnalysisResult"):
         analysis_result_to_json_object(cast(Any, "not a result"))
@@ -498,3 +629,26 @@ def test_schema_v1_explicitly_rejects_existing_prefix_context():
         analysis_result_to_json_object(result)
     with pytest.raises(TypeError, match="schema v1 requires a ResolutionContext"):
         render_analysis_json(result)
+
+
+def test_schema_v2_explicitly_rejects_resolution_context():
+    with pytest.raises(TypeError, match="schema v2 requires an ExistingPrefixContext"):
+        analysis_result_to_json_object(golden_result(), schema_version=2)
+    with pytest.raises(TypeError, match="schema v2 requires an ExistingPrefixContext"):
+        render_analysis_json(golden_result(), schema_version=2)
+
+
+@pytest.mark.parametrize("schema_version", [True, False, 0, 3, -1, "2", None])
+def test_schema_version_selector_rejects_bool_and_unsupported_values(schema_version):
+    with pytest.raises(ValueError, match="schema_version must be 1 or 2"):
+        analysis_result_to_json_object(
+            golden_result(), schema_version=cast(Any, schema_version)
+        )
+    with pytest.raises(ValueError, match="schema_version must be 1 or 2"):
+        render_analysis_json(golden_result(), schema_version=cast(Any, schema_version))
+
+
+def test_schema_version_one_remains_byte_identical_when_selected_explicitly():
+    assert render_analysis_json(golden_result()) == render_analysis_json(
+        golden_result(), schema_version=1
+    )

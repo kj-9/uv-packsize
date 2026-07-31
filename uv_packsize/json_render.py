@@ -8,7 +8,12 @@ its error/exit contract are connected separately.
 import json
 import re
 
-from uv_packsize.models import AnalysisResult, AnalysisWarning, ResolutionContext
+from uv_packsize.models import (
+    AnalysisResult,
+    AnalysisWarning,
+    ExistingPrefixContext,
+    ResolutionContext,
+)
 
 _NORMALIZED_NAME_SEPARATOR = re.compile(r"[-_.]+")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*$")
@@ -131,6 +136,32 @@ def _context_to_json(context: ResolutionContext) -> dict[str, object]:
     }
 
 
+def _existing_prefix_context_to_json(
+    context: ExistingPrefixContext,
+) -> dict[str, object]:
+    """Return the intentionally non-resolving schema-v2 context.
+
+    These fixed empty/null fields make absence of resolver provenance explicit;
+    they must not be inferred from an already-installed prefix.
+    """
+
+    return {
+        "input_kind": "existing-prefix",
+        "requirements": [],
+        "python_version": context.python_version,
+        "platform": context.platform,
+        "architecture": context.architecture,
+        "path_flavor": context.path_flavor.value,
+        "case_rule": context.case_rule.value,
+        "uv_version": None,
+        "build_policy": None,
+        "compile_bytecode": None,
+        "extras": [],
+        "index_identifiers": [],
+        "resolution_strategy": None,
+    }
+
+
 def _warning_to_json(warning: AnalysisWarning) -> dict[str, str]:
     return {
         "code": warning.code.value,
@@ -139,26 +170,52 @@ def _warning_to_json(warning: AnalysisWarning) -> dict[str, str]:
     }
 
 
-def analysis_result_to_json_object(result: AnalysisResult) -> dict[str, object]:
-    """Convert an analysis model to the ordered public schema-v1 object."""
+def _schema_version(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in (1, 2):
+        raise ValueError("schema_version must be 1 or 2")
+    return value
+
+
+def analysis_result_to_json_object(
+    result: AnalysisResult,
+    *,
+    schema_version: int = 1,
+) -> dict[str, object]:
+    """Convert an analysis model to an ordered, versioned public object."""
 
     if not isinstance(result, AnalysisResult):
         raise TypeError("result must be an AnalysisResult")
-    if not isinstance(result.context, ResolutionContext):
+    selected_schema_version = _schema_version(schema_version)
+    if selected_schema_version == 1 and not isinstance(
+        result.context, ResolutionContext
+    ):
         raise TypeError("schema v1 requires a ResolutionContext")
+    if selected_schema_version == 2 and not isinstance(
+        result.context, ExistingPrefixContext
+    ):
+        raise TypeError("schema v2 requires an ExistingPrefixContext")
+
+    if selected_schema_version == 1:
+        if not isinstance(result.context, ResolutionContext):  # pragma: no cover
+            raise AssertionError("validated ResolutionContext unexpectedly changed")
+        context_json = _context_to_json(result.context)
+    else:
+        if not isinstance(result.context, ExistingPrefixContext):  # pragma: no cover
+            raise AssertionError("validated ExistingPrefixContext unexpectedly changed")
+        context_json = _existing_prefix_context_to_json(result.context)
 
     distribution_total = sum(
         distribution.total_logical_bytes for distribution in result.distributions
     )
     return {
-        "schema_version": 1,
+        "schema_version": selected_schema_version,
         "measurement": {
             "kind": "installed-logical-size",
             "unit": "bytes",
             "ownership": "distribution-owned-files",
             "deduplication": "canonical-identity",
         },
-        "context": _context_to_json(result.context),
+        "context": context_json,
         "distributions": [
             {
                 "name": distribution.name,
@@ -198,12 +255,12 @@ def analysis_result_to_json_object(result: AnalysisResult) -> dict[str, object]:
     }
 
 
-def render_analysis_json(result: AnalysisResult) -> str:
-    """Render schema v1 with stable whitespace and exactly one trailing newline."""
+def render_analysis_json(result: AnalysisResult, *, schema_version: int = 1) -> str:
+    """Render a selected schema with stable whitespace and one trailing newline."""
 
     return (
         json.dumps(
-            analysis_result_to_json_object(result),
+            analysis_result_to_json_object(result, schema_version=schema_version),
             ensure_ascii=False,
             allow_nan=False,
             indent=2,

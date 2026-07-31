@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "measurement": {
+    "kind": "installed-logical-size",
+    "unit": "bytes",
+    "ownership": "distribution-owned-files",
+    "deduplication": "canonical-identity"
+  },
+  "context": {
+    "input_kind": "existing-prefix",
+    "requirements": [],
+    "python_version": "3.13.2",
+    "platform": "macosx",
+    "architecture": null,
+    "path_flavor": "posix",
+    "case_rule": "sensitive",
+    "uv_version": null,
+    "build_policy": null,
+    "compile_bytecode": null,
+    "extras": [],
+    "index_identifiers": [],
+    "resolution_strategy": null
+  },
+  "distributions": [],
+  "warnings": [],
+  "duplicate_ownerships": [],
+  "completeness": "complete",
+  "totals": {
+    "global_logical_bytes": 0,
+    "distribution_logical_bytes": 0
+  }
+}
