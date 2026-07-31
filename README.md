@@ -59,6 +59,8 @@ Options:
                                   dependency paths and attribution.
   --breakdown                     Text output only: show global file-category
                                   and dependency-role sizes.
+  --contributions                 Text output only: show non-split requested-
+                                  root byte contributions.
   -p, --python TEXT               Specify the Python version for the virtual
                                   environment.
   --help                          Show this message and exit.
@@ -105,7 +107,7 @@ modes. In prefix text output, `--bin` uses the heading `Binaries in prefix`;
 generated script sizes can differ from a fresh temporary installation because
 POSIX script shebangs can contain the installation path.
 
-`--explain` and `--breakdown` are unavailable with prefix text output because
+`--explain`, `--breakdown`, and `--contributions` are unavailable with prefix text output because
 the original requested roots and resolver conditions are not known. With
 `--json`, those presentation flags (and `--bin`) are accepted but ignored, so
 all such option combinations produce the same schema v2 bytes.
@@ -181,7 +183,8 @@ standard output empty; invalid command-line usage uses Click's status 2.
 `--explain` is also text-only: `--json --explain` is accepted and produces
 byte-identical output (including progress and errors) to `--json`, preserving
 the schema v1 compatibility boundary.
-`--breakdown` follows the same rule, including when combined with `--explain`:
+`--breakdown` and `--contributions` follow the same rule, including when
+combined with other text-only options:
 all `--json` combinations preserve the same schema v1 bytes as `--json` alone.
 
 ### Dependency explanations
@@ -193,9 +196,30 @@ is not a claim about resolver provenance. If installed metadata is missing,
 invalid, or otherwise incomplete, the command still reports the size and adds
 a sanitized graph-warning summary with warning-code counts.
 
-Dependency paths explain which roots reach an installed distribution, but this
-release does not assign a distribution's bytes (including shared dependency
-bytes) to individual roots. That byte-attribution policy is planned work.
+Dependency paths explain which roots reach an installed distribution. Use
+`--contributions` for the corresponding non-split byte view.
+
+### Requested-root contributions
+
+Pass `--contributions` with text output to append requested-root exclusive,
+shared, and closure bytes; exact shared root-set buckets; and a reconciliation
+to the global total. Reachability is derived from installed distributions'
+Core Metadata, not resolver provenance. A closure includes every observed byte
+reachable from that root, so closures for different roots must not be summed.
+An exact shared root-set bucket is counted once globally, never once per root.
+
+`exclusive` contains bytes reachable from exactly one recognized root;
+`shared` contains bytes in observed root sets containing that root and at least
+one other recognized root; and `closure = exclusive + shared`. This describes
+the fixed, observed installed graph only. It is not a resolver counterfactual
+about what would be installed if a root were removed.
+
+Duplicate requested root inputs do not create bytes or root sets: they retain
+their distinct 1-based input indices in the root row. If Core Metadata cannot
+form a complete graph, contribution numbers and root-set details are marked
+unavailable; the measured global footprint and its inventory completeness are
+still reported. As with `--explain` and `--breakdown`, this text-only option
+does not change JSON schema v1.
 
 ### Global footprint breakdown
 
@@ -213,8 +237,8 @@ category breakdown remains available while dependency-role sizes are marked
 unavailable and a sanitized warning-code summary is shown. `--explain
 --breakdown` prints the normal report once, then dependency explanations and
 the footprint sections; any graph warning is shown once. JSON schema v1 is not
-extended by this opt-in text output. Per-requested-root byte allocation,
-including a policy for shared dependencies, remains planned work.
+extended by these opt-in text outputs. `--contributions` follows them, with the
+normal report rendered once and its contribution sections last.
 
 ## Measurement
 
@@ -260,10 +284,9 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
   dependency resolution. Compare results only when those conditions match.
 - Multiple requested packages are installed into one environment. The current
   resolver normally installs a shared dependency once. `--explain` identifies
-  direct, transitive, and shared installed dependencies and their paths, but it
-  does not attribute their bytes to individual root packages. `--breakdown`
-  instead describes global category and role totals; root-by-root byte
-  attribution is planned for Phase 3's later root-contribution work.
+  direct, transitive, and shared installed dependencies and their paths;
+  `--breakdown` describes global category and role totals; and
+  `--contributions` provides a non-split, observed root-set byte view.
 - Text output is intended for interactive use. For a versioned record with the
   measurement context needed for comparison, use `--json`.
 

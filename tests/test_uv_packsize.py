@@ -341,6 +341,7 @@ def _run_local_layout(  # noqa: PLR0913
     json_output=False,
     explain=False,
     breakdown=False,
+    contributions=False,
     allow_build=False,
 ):
     venv_path, python, _site_packages = installed_venv
@@ -378,6 +379,8 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.append("--explain")
     if breakdown:
         arguments.append("--breakdown")
+    if contributions:
+        arguments.append("--contributions")
     if allow_build:
         arguments.append("--allow-build")
     return CliRunner().invoke(cli, arguments)
@@ -592,11 +595,20 @@ def test_cli_json_ignores_all_text_only_options_without_reading_metadata(
         "uv_packsize.cli.summarize_footprint",
         lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
     )
+    monkeypatch.setattr(
+        "uv_packsize.cli.summarize_root_contributions",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
 
     default = _run_local_layout(
         monkeypatch, installed_venv, ["sample==1.0"], json_output=True
     )
-    for options in ({"breakdown": True}, {"explain": True, "breakdown": True}):
+    for options in (
+        {"breakdown": True},
+        {"contributions": True},
+        {"explain": True, "breakdown": True},
+        {"explain": True, "breakdown": True, "contributions": True},
+    ):
         text_options = _run_local_layout(
             monkeypatch,
             installed_venv,
@@ -688,6 +700,71 @@ def test_cli_explain_and_breakdown_composes_sections_without_duplicate_warning(
     assert "--- File Category Breakdown ---" in result.output
     assert "Unavailable: incomplete dependency graph." in result.output
     assert result.output.count("Warning: incomplete dependency graph") == 1
+
+
+def test_cli_contributions_renders_once_and_composes_all_sections(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    calls = []
+    original = __import__(
+        "uv_packsize.cli", fromlist=["build_installed_dependency_graph"]
+    ).build_installed_dependency_graph
+
+    def build_once(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr("uv_packsize.cli.build_installed_dependency_graph", build_once)
+    default = _run_local_layout(monkeypatch, installed_venv, ["sample==1.0"])
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+        contributions=True,
+    )
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert (
+        result.output.partition("\n\n--- Requested Roots ---")[0].split(
+            "Explaining dependencies...\n", maxsplit=1
+        )[1]
+        == default.output.split("Analyzing sizes...\n", maxsplit=1)[1].rsplit(
+            "\n\nCalculation complete.\n", maxsplit=1
+        )[0]
+    )
+    assert result.output.count("--- Package Sizes ---") == 1
+    assert (
+        result.output.index("--- Requested Roots ---")
+        < result.output.index("--- File Category Breakdown ---")
+        < result.output.index("--- Root Contributions ---")
+    )
+
+
+def test_cli_contributions_composes_incomplete_warning_once(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    (site_packages / "sample-1.0.dist-info" / "METADATA").unlink()
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+        contributions=True,
+    )
+
+    assert result.exit_code == 0
+    assert result.output.count("Warning: incomplete dependency graph") == 1
+    assert result.output.count("Unavailable: incomplete dependency graph.") == 4
+    assert "--- Root Contributions ---" in result.output
 
 
 def test_cli_explain_renders_installed_metadata_attribution(
@@ -812,6 +889,9 @@ def test_cli_help_describes_json_and_bin_interaction():
     assert "--breakdown" in result.output
     assert "global file-category" in result.output
     assert "dependency-role sizes." in result.output
+    assert "--contributions" in result.output
+    assert "non-split requested-" in result.output
+    assert "root byte contributions." in result.output
     assert "--allow-build" in result.output
     assert "Allow source builds during installation;" in result.output
     assert "default." in result.output
@@ -1374,7 +1454,13 @@ def test_cli_prefix_json_ignores_text_presentation_options(installed_venv):
     decorated = CliRunner().invoke(
         cli,
         _prefix_arguments(
-            venv_path, site_packages, "--json", "--bin", "--explain", "--breakdown"
+            venv_path,
+            site_packages,
+            "--json",
+            "--bin",
+            "--explain",
+            "--breakdown",
+            "--contributions",
         ),
     )
 
@@ -1418,7 +1504,7 @@ def test_cli_prefix_guards_are_usage_errors_and_do_not_echo_path(arguments, mess
     assert "/private/secret" not in result.output
 
 
-@pytest.mark.parametrize("option", ["--explain", "--breakdown"])
+@pytest.mark.parametrize("option", ["--explain", "--breakdown", "--contributions"])
 def test_cli_prefix_rejects_text_graph_options(installed_venv, option):
     venv_path, _python, site_packages = installed_venv
     result = CliRunner().invoke(

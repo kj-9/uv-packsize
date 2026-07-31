@@ -30,14 +30,35 @@ def render_explained_analysis_report(
         raise TypeError("show_scripts must be a bool")
 
     prefix = render_analysis_report(result.analysis, show_scripts=show_scripts)
+    return "\n\n".join((prefix, *render_explanation_sections(result)))
+
+
+def render_explanation_sections(
+    result: ExplainedAnalysisResult,
+    *,
+    include_graph_warning_summary: bool = True,
+) -> tuple[str, ...]:
+    """Return deterministic explanation-only sections for report composition.
+
+    A compositor that emits another graph-derived section can suppress the
+    shared, sanitized warning summary while preserving all explanation data.
+    """
+
+    if not isinstance(result, ExplainedAnalysisResult):
+        raise TypeError("result must be an ExplainedAnalysisResult")
+    if not isinstance(include_graph_warning_summary, bool):
+        raise TypeError("include_graph_warning_summary must be a bool")
     sections = (
         _render_requested_roots(result),
         _render_dependency_attribution(result),
         _render_dependency_paths(result),
     )
-    if result.graph.completeness is DependencyGraphCompleteness.INCOMPLETE:
+    if (
+        include_graph_warning_summary
+        and result.graph.completeness is DependencyGraphCompleteness.INCOMPLETE
+    ):
         sections = (*sections, _render_graph_warning_summary(result))
-    return "\n\n".join((prefix, *sections))
+    return sections
 
 
 def _render_requested_roots(result: ExplainedAnalysisResult) -> str:

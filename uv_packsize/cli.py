@@ -21,10 +21,9 @@ from uv_packsize.existing_prefix import (
     ExistingPrefixDiscoveryError,
     discover_existing_prefix,
 )
-from uv_packsize.explanation import render_explained_analysis_report
+from uv_packsize.explanation import render_explanation_sections
 from uv_packsize.footprint import summarize_footprint
 from uv_packsize.footprint_render import (
-    render_footprint_report,
     render_footprint_sections,
 )
 from uv_packsize.installed_metadata import (
@@ -35,6 +34,8 @@ from uv_packsize.inventory import InventoryError
 from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy, CaseRule, PathFlavor
 from uv_packsize.render import render_analysis_report
+from uv_packsize.root_contribution_render import render_root_contribution_sections
+from uv_packsize.root_contributions import summarize_root_contributions
 
 _UV_VERSION = re.compile(
     r"uv\s+([0-9]+(?:\.[0-9]+)+(?:[-+][A-Za-z0-9.-]+)?)"
@@ -257,6 +258,11 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Text output only: show global file-category and dependency-role sizes.",
 )
 @click.option(
+    "--contributions",
+    is_flag=True,
+    help="Text output only: show non-split requested-root byte contributions.",
+)
+@click.option(
     "-p",
     "--python",
     "python_version",
@@ -271,6 +277,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     json_output,
     explain,
     breakdown,
+    contributions,
     allow_build,
     python_version,
 ):
@@ -284,6 +291,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             python_version=python_version,
             explain=explain,
             breakdown=breakdown,
+            contributions=contributions,
             json_output=json_output,
         )
         _run_prefix_analysis(
@@ -361,7 +369,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         # --json alone.
         if json_output:
             click.echo(render_analysis_json(result), nl=False)
-        elif explain or breakdown:
+        elif explain or breakdown or contributions:
             if explain:
                 click.echo("Explaining dependencies...")
             try:
@@ -375,22 +383,36 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             # installed-metadata adapter boundary.  Do not turn its failures
             # into a sanitized user-facing metadata error.
             footprint = summarize_footprint(explained) if breakdown else None
-            if explain and breakdown:
-                explanation = render_explained_analysis_report(
-                    explained, show_scripts=bin
-                )
+            contributions_result = (
+                summarize_root_contributions(explained) if contributions else None
+            )
+            sections = []
+            graph_warning_rendered = False
+            if explain:
+                sections.extend(render_explanation_sections(explained))
+                graph_warning_rendered = True
+            if breakdown:
                 assert footprint is not None
-                footprint_sections = render_footprint_sections(
-                    footprint, include_graph_warning_summary=False
+                sections.extend(
+                    render_footprint_sections(
+                        footprint,
+                        include_graph_warning_summary=not graph_warning_rendered,
+                    )
                 )
-                click.echo("\n\n".join((explanation, *footprint_sections)))
-            elif explain:
-                click.echo(
-                    render_explained_analysis_report(explained, show_scripts=bin)
+                graph_warning_rendered = True
+            if contributions:
+                assert contributions_result is not None
+                sections.extend(
+                    render_root_contribution_sections(
+                        contributions_result,
+                        include_graph_warning_summary=not graph_warning_rendered,
+                    )
                 )
-            else:
-                assert footprint is not None
-                click.echo(render_footprint_report(footprint, show_scripts=bin))
+            click.echo(
+                "\n\n".join(
+                    (render_analysis_report(result, show_scripts=bin), *sections)
+                )
+            )
         else:
             click.echo(render_analysis_report(result, show_scripts=bin))
 
@@ -406,6 +428,7 @@ def _validate_prefix_options(  # noqa: PLR0913
     python_version: str | None,
     explain: bool,
     breakdown: bool,
+    contributions: bool,
     json_output: bool,
 ) -> None:
     """Reject mutually exclusive CLI modes before any external interaction."""
@@ -423,8 +446,16 @@ def _validate_prefix_options(  # noqa: PLR0913
     # Text-only graph assertions require a resolving input, which a prefix
     # deliberately does not preserve.  JSON intentionally ignores all text
     # presentation flags, matching the established JSON option boundary.
-    if not json_output and (explain or breakdown):
-        unavailable = "--explain" if explain else "--breakdown"
+    if not json_output and (explain or breakdown or contributions):
+        unavailable = next(
+            option
+            for enabled, option in (
+                (explain, "--explain"),
+                (breakdown, "--breakdown"),
+                (contributions, "--contributions"),
+            )
+            if enabled
+        )
         raise click.UsageError(f"{unavailable} is unavailable with --prefix.")
 
 

@@ -198,6 +198,113 @@ def test_real_uv_install_from_local_wheels_combines_explanation_and_breakdown(tm
     assert completed.stderr == ""
 
 
+def test_real_uv_install_from_local_wheels_renders_non_split_contributions(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    completed = _run_cli(tmp_path, wheelhouse, "--contributions")
+    combined = _run_cli(
+        tmp_path, wheelhouse, "--explain", "--breakdown", "--contributions"
+    )
+    raw_result = json.loads(_run_cli(tmp_path, wheelhouse, "--json").stdout)
+    totals = {
+        distribution["name"]: distribution["totals"]["logical_bytes"]
+        for distribution in raw_result["distributions"]
+    }
+    global_total = raw_result["totals"]["global_logical_bytes"]
+    exclusive_root_a = totals[_ROOT_A]
+    exclusive_root_b = totals[_ROOT_B]
+    shared_exact_root_set = totals[_SHARED]
+    root_a_closure = totals[_ROOT_A] + totals[_SHARED]
+    root_b_closure = totals[_ROOT_B] + totals[_SHARED]
+
+    assert completed.returncode == combined.returncode == 0
+    assert global_total == exclusive_root_a + exclusive_root_b + shared_exact_root_set
+    assert root_a_closure == exclusive_root_a + shared_exact_root_set
+    assert root_b_closure == exclusive_root_b + shared_exact_root_set
+    assert completed.stdout.count("--- Package Sizes ---") == 1
+    assert "--- Root Contributions ---" in completed.stdout
+    assert "--- Shared Root-Set Bytes ---" in completed.stdout
+    assert "--- Contribution Reconciliation ---" in completed.stdout
+    assert re.search(
+        rf"{re.escape(_ROOT_A)}\s+1\s+{re.escape(format_size(exclusive_root_a))}"
+        rf"\s+{re.escape(format_size(shared_exact_root_set))}\s+{re.escape(format_size(root_a_closure))}",
+        completed.stdout,
+    )
+    assert re.search(
+        rf"{re.escape(_ROOT_B)}\s+2\s+{re.escape(format_size(exclusive_root_b))}"
+        rf"\s+{re.escape(format_size(shared_exact_root_set))}\s+{re.escape(format_size(root_b_closure))}",
+        completed.stdout,
+    )
+    assert (
+        f"{_ROOT_A}, {_ROOT_B}" in completed.stdout
+        and format_size(shared_exact_root_set) in completed.stdout
+    )
+    assert re.search(
+        rf"Global total\s+{re.escape(format_size(global_total))}", completed.stdout
+    )
+    assert (
+        combined.stdout.index("--- Requested Roots ---")
+        < combined.stdout.index("--- File Category Breakdown ---")
+        < combined.stdout.index("--- Root Contributions ---")
+    )
+    assert completed.stderr == combined.stderr == ""
+
+
+def test_real_uv_contributions_preserve_duplicate_root_indices_without_bytes(
+    tmp_path,
+):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    unique = _run_cli(tmp_path, wheelhouse, "--contributions")
+    unique_json = _run_cli(tmp_path, wheelhouse, "--json")
+    duplicate = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--contributions",
+        requirements=(_REQUIREMENTS[0], _REQUIREMENTS[1], _REQUIREMENTS[0]),
+    )
+    duplicate_json = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--json",
+        requirements=(_REQUIREMENTS[0], _REQUIREMENTS[1], _REQUIREMENTS[0]),
+    )
+
+    assert unique.returncode == unique_json.returncode == 0
+    assert duplicate.returncode == duplicate_json.returncode == 0
+    unique_payload = json.loads(unique_json.stdout)
+    duplicate_payload = json.loads(duplicate_json.stdout)
+    unique_totals = {
+        distribution["name"]: distribution["totals"]["logical_bytes"]
+        for distribution in unique_payload["distributions"]
+    }
+    duplicate_totals = {
+        distribution["name"]: distribution["totals"]["logical_bytes"]
+        for distribution in duplicate_payload["distributions"]
+    }
+
+    assert (
+        duplicate_payload["totals"]["global_logical_bytes"]
+        == unique_payload["totals"]["global_logical_bytes"]
+    )
+    assert duplicate_totals == unique_totals
+    assert unique_payload["totals"]["global_logical_bytes"] == sum(
+        unique_totals[name] for name in (_ROOT_A, _ROOT_B, _SHARED)
+    )
+    assert _reported_total(unique.stdout) == _reported_total(duplicate.stdout)
+    assert re.search(rf"{re.escape(_ROOT_A)}\s+1, 3\s+", duplicate.stdout)
+    assert re.search(
+        rf"{re.escape(_ROOT_A)}\s+1, 3\s+"
+        rf"{re.escape(format_size(unique_totals[_ROOT_A]))}\s+"
+        rf"{re.escape(format_size(unique_totals[_SHARED]))}\s+"
+        rf"{re.escape(format_size(unique_totals[_ROOT_A] + unique_totals[_SHARED]))}",
+        duplicate.stdout,
+    )
+    assert duplicate.stdout.count(f"{_ROOT_A}, {_ROOT_B}") == 1
+
+
 def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
@@ -270,10 +377,14 @@ def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
         ("--bin",),
         ("--explain",),
         ("--breakdown",),
+        ("--contributions",),
         ("--bin", "--explain"),
         ("--bin", "--breakdown"),
         ("--explain", "--breakdown"),
+        ("--explain", "--contributions"),
+        ("--breakdown", "--contributions"),
         ("--bin", "--explain", "--breakdown"),
+        ("--bin", "--explain", "--breakdown", "--contributions"),
     ):
         with_text_option = _run_cli(tmp_path, wheelhouse, "--json", *options)
 
@@ -401,10 +512,14 @@ def test_existing_prefix_local_wheels_bin_and_json_options_preserve_contract(tmp
         ("--bin",),
         ("--explain",),
         ("--breakdown",),
+        ("--contributions",),
         ("--bin", "--explain"),
         ("--bin", "--breakdown"),
         ("--explain", "--breakdown"),
+        ("--explain", "--contributions"),
+        ("--breakdown", "--contributions"),
         ("--bin", "--explain", "--breakdown"),
+        ("--bin", "--explain", "--breakdown", "--contributions"),
     ):
         decorated = _run_prefix_cli(
             tmp_path, prefix, site_packages_relative, case_rule, "--json", *options
@@ -432,7 +547,10 @@ def test_existing_prefix_scan_does_not_mutate_real_local_wheel_environment(tmp_p
 
 
 def _run_cli(
-    tmp_path: Path, wheelhouse: Path, *options: str
+    tmp_path: Path,
+    wheelhouse: Path,
+    *options: str,
+    requirements: tuple[str, ...] = _REQUIREMENTS,
 ) -> subprocess.CompletedProcess[str]:
     environment = _integration_environment(tmp_path, wheelhouse)
     return subprocess.run(
@@ -443,7 +561,7 @@ def _run_cli(
             "--python",
             sys.executable,
             *options,
-            *_REQUIREMENTS,
+            *requirements,
         ],
         check=False,
         capture_output=True,

@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
-| `in_progress` | P3-05: 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する |
-| 次のタスク | P3-05c: root contributionをCLI/README/local integrationへ接続する |
+| 現在のPhase | Phase 3: サイズの理由を説明する（`done`） |
+| `in_progress` | なし |
+| 次のタスク | P4-01a: baseline JSON/diff policyの契約とmodelを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | existing environment/prefix input modeの設計 |
+| 次の成果物 | P4-01a: baseline JSON/diff policyの契約とmodel |
 
 ## ステータス定義
 
@@ -67,7 +67,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 0 | 測定契約とプロダクト方針の整理 | `done` |
 | Phase 1 | リリース品質の回復 | `done` |
 | Phase 2 | 信頼できる測定エンジン | `done` |
-| Phase 3 | サイズの理由を説明する | `in_progress` |
+| Phase 3 | サイズの理由を説明する | `done` |
 | Phase 4 | CIでの継続管理 | `todo` |
 | Phase 5 | project/lockと比較分析 | `todo` |
 | Phase 6 | エコシステム連携 | `todo` |
@@ -228,7 +228,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-04c2 | Phase 3 | prefix README契約とlocal end-to-end検証を接続する | `done` |
 | P3-05a | Phase 3 | root set単位の純粋なnon-split byte aggregateを実装する | `done` |
 | P3-05b | Phase 3 | root contribution resultのpure text presentationを実装する | `done` |
-| P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `todo` |
+| P3-05c | Phase 3 | root contributionをCLI/README/local integrationへ接続する | `done` |
+| P4-01a | Phase 4 | baseline JSON/diff policyの契約とmodelを設計する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
@@ -695,6 +696,27 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP3-05cとする。root contributionのtext-only public CLI option、README、local wheel integrationを接続し、既存JSON schemaを変更しない。
+
+### 2026-07-31: P3-05c root contribution public CLI/README/local integration
+
+状態: `done`
+
+実装:
+
+- `--contributions`をtext-only opt-inとしてCLIへ接続した。通常reportを一度だけbyte-identical prefixとして描画し、`--explain`、`--breakdown`、contribution sectionsをその順で合成する。いずれかのgraph-derived text optionが必要な場合もinstalled Core Metadata graphは一度だけ構築する。
+- explanation rendererへsection-only APIを追加し、合成経路でsafe graph-warning code/count summaryを一度だけ出す。graph incomplete時もfootprint category totalsは保持し、contribution sectionsは数値を出さずunavailableを明示する。
+- JSON schema v1/v2は変更していない。`--json`では`--contributions`を含む全text optionを無視し、metadata graph、footprint、root contribution aggregateを呼ばず、stdout/stderr bytesを保持する。prefix textでは`--contributions`をusage errorとし、prefix JSONでは無視する。
+- READMEにCore Metadata reachability、root closureの非加算、exact shared root-setの一度だけの計上、observed graph（resolver counterfactualではない）、duplicate input index、incomplete graphの公開契約を追記した。local wheelhouseのoffline E2Eで2 rootとshared dependencyのexclusive/shared/closure、exact shared root-set、global reconciliation、section order、JSON option byte equalityを検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py tests/test_explanation.py -q` — 成功（81 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（534 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- Phase 3は完了。次のタスク候補はP4-01aとし、baseline JSONとdiff policyの互換契約、入力model、schema version境界を先に固定してからP4-01の比較・budget policyへ進む。
 
 ## 作業記録
 
