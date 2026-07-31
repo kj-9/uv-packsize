@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-04b: existing prefixのlayout/context discovery adapterを実装する |
+| 次のタスク | P3-04c: prefix CLI/README契約とend-to-end検証を接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -223,7 +223,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-03c | Phase 3 | footprint presentationをCLI/README契約へ接続する | `done` |
 | P3-04a1 | Phase 3 | existing-prefix context modelと既存schema v1互換境界を実装する | `done` |
 | P3-04a2 | Phase 3 | existing-prefix用JSON schema v2を設計・実装する | `done` |
-| P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `todo` |
+| P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `done` |
 | P3-04c | Phase 3 | prefix CLI/README契約とend-to-end検証を接続する | `todo` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
@@ -594,6 +594,34 @@ P2-06bの完了条件:
 - JSON schema v1と既存のresolution-based text/JSON出力はbyte-compatibleに維持する。existing prefix結果はv2以降の明示的schemaでだけ機械可読に表現する。
 
 ## 作業記録
+
+### 2026-07-31: P3-04b existing-prefix read-only discovery adapter
+
+状態: `done`
+
+実装:
+
+- `ExistingPrefixEnvironment`と`discover_existing_prefix()`を追加した。既存prefixを実行・変更せず、callerが明示したhost nativeの`PathFlavor`、`CaseRule`、相対site-packages layoutから`ExistingPrefixContext`と決定的な`InventoryLayout`群を構築する。Python、platform、architectureは安全に観測できないためすべて`None`に保つ。`CaseRule`はtrustedなcaller declarationであり、write probeは行わない。
+- prefixは`Path`だけを受理し、relative pathはCWD基準でabsolute化する。final lexical symlinkを拒否した後にcanonical physical targetへ固定するため、ancestor symlinkは許容してもreturned layoutはtargetを保持する。site pathは非空・正規化済み・nativeな相対pathだけを受理し、absolute、drive、UNC、NUL、`.`、`..`、空componentを拒否する。各componentを`lstat`してdirectoryかつsymlinkでないことを確認し、lexical/resolved双方のprefix containmentを検証する。
+- `ExistingPrefixEnvironment.layouts`はin-process inventory用のtrusted scan handleであり、analysis result/JSONではない。physical pathを含むためdataclass `repr`から除外する。path flavorがhost nativeでない場合はfilesystem access前に拒否する。duplicate/alias layoutは既存の`validated_inventory_layouts()`で決定的に検出する。全失敗は`ExistingPrefixDiscoveryError`のstable codeと固定target tokenだけに正規化する。exception causeは内部に保持され得るため、P3-04cのCLI boundaryは`from None`で公開する。
+- Windows native relative componentはinventoryと同じreserved-name/character規則で検証する。ADS colon、control character、`<>:"|?*`、trailing dot/space、`con`/`prn`/`aux`/`nul`/`com1`〜`com9`/`lpt1`〜`lpt9`（extension付きも）をfilesystem access前に拒否する。
+- path treeはdescriptor snapshotではないため、discovery中または後続inventory scan中の並行変更を防げないbest-effort validationである。このTOCTOU制約はP3-04cのpublic contractにも明記する。
+- build artifact検証のcritical module一覧へadapterを追加した。CLI、README、JSON/schema、解析/graph接続はP3-04cへ残した。
+
+テスト:
+
+- `tests/test_existing_prefix.py`で複数siteの順序不変、host flavor境界、explicit case rule、POSIX/Windows-like不正path、Windows予約名/ADS/control character、prefix/site/intermediate symlink、missing/non-directory/duplicate/alias site、安全なerror、書込みなし、relative prefix canonicalization、ancestor symlink交換後のcanonical layout、`Path` type boundary、reprからのprefix非漏洩、context/layout不変条件、およびinventory analysisへの接続を検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_existing_prefix.py -q` — 成功（33 passed, 1 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（489 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+引き継ぎ:
+
+- 次のタスクはP3-04cとする。read-only adapterをpublic prefix CLI、README、local prefix end-to-end/error contractへ接続する。
 
 ### 2026-07-31: P3-04a2 existing-prefix JSON schema v2
 

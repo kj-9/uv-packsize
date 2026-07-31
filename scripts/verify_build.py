@@ -20,6 +20,7 @@ CRITICAL_MODULES = {
     "uv_packsize/cli.py",
     "uv_packsize/dependency_graph.py",
     "uv_packsize/dependency_paths.py",
+    "uv_packsize/existing_prefix.py",
     "uv_packsize/explanation.py",
     "uv_packsize/footprint.py",
     "uv_packsize/footprint_render.py",
