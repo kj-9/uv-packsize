@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-03: diff JSON/baseline write contractを分離して設計する |
+| 次のタスク | P4-03a: pure comparison JSON schema/rendererを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-03: diff JSON/baseline write contract |
+| 次の成果物 | P4-03a: comparison-result-v1 JSON schema/renderer |
 
 ## ステータス定義
 
@@ -68,7 +68,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 1 | リリース品質の回復 | `done` |
 | Phase 2 | 信頼できる測定エンジン | `done` |
 | Phase 3 | サイズの理由を説明する | `done` |
-| Phase 4 | CIでの継続管理 | `todo` |
+| Phase 4 | CIでの継続管理 | `in_progress` |
 | Phase 5 | project/lockと比較分析 | `todo` |
 | Phase 6 | エコシステム連携 | `todo` |
 
@@ -234,7 +234,12 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `done` |
 | P4-02b1 | Phase 4 | current `AnalysisResult`からsafe baseline comparison projectionを実装する | `done` |
 | P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `done` |
-| P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `todo` |
+| P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `done` |
+| P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `todo` |
+| P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `todo` |
+| P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `todo` |
+| P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `todo` |
+| P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -846,6 +851,38 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP4-03とする。budget policyの前に、baseline writeとversioned diff JSONの公開契約を小さく分離して設計する。DoDは、read-only compare text/既存analysis JSON v1/v2を不変にしたまま、書込みの明示opt-in・atomicity・overwrite方針、diff schema version/安全なfield、JSON成功/失敗stdout契約、unit testを固定すること。budget enforcement、config file、CI workflowは含めない。
+
+### 2026-07-31: P4-03 diff JSON/baseline write contract
+
+状態: `done`
+
+設計判断:
+
+- 比較JSONとbaseline書込みは、責務・失敗境界・公開schemaを分離する。既存のanalysis JSON schema v1/v2、`--baseline` text比較、`--json > baseline.json`による既存のbaseline作成経路は変更しない。budget enforcement、設定file、CI workflowはP4-03の対象外とし、P4-04aへ送る。
+- diff JSONはclosedでdeterministicな`comparison-result-v1`とする。JSON Schemaはdraft 2020-12でtop/nested objectを`additionalProperties: false`、全field必須、`schema_version: 1`に固定する。serializerのtop-level insertion orderは`schema_version`、`measurement`、`context`、`baseline`、`current`、`changes`、`completeness`とする。nested shapeはliteralに、`context={input_kind,comparison_context_fingerprint}`、side=`{totals:{global_logical_bytes,distribution_logical_bytes},completeness,warning_code_counts:[{code,count}],duplicate_ownership:{present,count}}`、`changes={totals:{global_logical_bytes_delta,distribution_logical_bytes_delta},distributions:[{name,kind,baseline:{version,logical_bytes}|null,current:{version,logical_bytes}|null,logical_bytes_delta}],nonreconciliation:{present,distribution_minus_global_logical_bytes_delta,reason}}`と固定する。fingerprintはcanonicalなsafe `BaselineResolutionContext` projectionをUTF-8 canonical JSONへ縮約し、`uv-packsize/comparison-context/v1\0`をdomainとしてSHA-256する。`changes.distributions`はfull outer joinでunchangedを含む。`nonreconciliation.present=false`はdelta `0`かつreason `null`、`true`はnonzero deltaかつ固定reason `duplicate-owned-files-may-be-counted-per-distribution`を必須とする。raw requirement、path、symlink target、baseline path、credential、free-form contextの元値は出力しない。このfingerprintは比較結果の相関には使えるため、共有時の相関可能性をREADMEで明記する。
+- `--comparison-json`は`--baseline`を必須とし、compare成功時にJSON+LFだけをstdoutへ出す。既存text比較のstdout bytesは不変とする。比較前のusage/loader/operational failure、比較不能、serializer failureを含む失敗時はstdoutを空にし、既存exit code 1--4とsanitized stderrを維持する。
+- baseline writeはfresh-install schema v1の既存`render_analysis_json()` bytesを保存する。比較用に縮約した`Baseline` modelを新schemaとして書き出さない。pure render/validate境界でexactなfresh `AnalysisResult`、8 MiB上限、`parse_baseline_json(payload)`とのprojection parityを検証してからI/Oへ渡す。これにより書込み直後のfileは既存`load_baseline()`で読め、`--json --write-baseline`ではstdoutと保存fileが完全一致する。
+- `--write-baseline PATH`はfresh analysisだけで許可し、`--prefix`および`--baseline`と排他とする。既定はno-clobber、既存targetの置換は`--overwrite-baseline`明示時だけ許可する。`--overwrite-baseline`単独はusage errorとする。text presentation optionは保存bytesを変えない。write modeのprogressはstderrに寄せ、analysis成功後かつreport/JSON stdoutの前に書込む。失敗時はstdoutを空、exit 3、固定codeだけの診断とする。
+- writerは既存directoryのparentだけを許可し、parentのsymlink/non-directoryとopen後のdevice/inode identity raceを拒否する。既存targetはsymlink/special fileを拒否し、hardlink拒否はregular targetの`st_nlink != 1`にだけ適用する。同一directoryに0600のexclusive temp fileを作成し、write、file fsync、close、atomic publish、可能なplatformでdirectory fsync、cleanupを行う。tempの0600 modeを維持してpublishし、最終baseline fileも0600とする。POSIXではparent directory FDとrelative basename、`O_NOFOLLOW | O_DIRECTORY`、`lstat`/`fstat` identity照合、`dir_fd`付きlinkまたはreplaceを使用する。no-clobber publishはatomic linkで競合上書きを防ぎ、非対応filesystemは安全側で失敗する。overwriteはatomic replaceを使う。path、temp name、payload、OS診断をエラーへ反射せず`BaselineWriteError`を既存baseline failure境界（exit 3）へ正規化する。Windowsではatomic visibilityを保証対象とし、directory entry durabilityはplatform依存としてREADMEに明記する。
+
+分割:
+
+| ID | 状態 | 依存 | 対象files | 完了条件 |
+|---|---|---|---|---|
+| P4-03a | `todo` | P4-03 | `uv_packsize/comparison_json_render.py`（新規）、`schemas/comparison-result-v1.schema.json`（新規）、`tests/test_comparison_json_render.py`（新規）、必要なら`tests/test_diff.py` | exactな`AnalysisDiff`だけを受ける`comparison_diff_to_json_object()`/`render_comparison_json()`とclosed `comparison-result-v1` JSON Schemaを実装する。top-levelの固定順、`input_kind`+canonical safe context fingerprint、side summary、signed totals、全distribution full outer joinのnullable sides/delta、warning code/count、`false => 0/null`・`true => nonzero/fixed reason`のnonreconciliation、int/enum/orderingをnetwork/I/Oなしのgolden/unit testで固定する。analysis JSON v1/v2とCLIを変更しない。 |
+| P4-03b | `todo` | P4-03a, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--comparison-json`を`--baseline`必須の比較表示modeとして接続する。JSON+LF-only stdout、text比較byte不変、failure時empty stdout、usage/load/operational/incompatibleの既存exit 1--4、sanitized diagnostics、loader/uvより先のoption guardをunit/local-wheel testで固定する。baseline書込み、analysis JSON schema変更、budgetは含めない。 |
+| P4-03c | `todo` | P4-03 | `uv_packsize/baseline.py`、`tests/test_baseline.py` | fresh v1 JSONのpure render/validate APIとatomic writerをCLIなしで実装する。既存serializer bytesとの一致、decoder/projector parity、8 MiB境界、parent symlink/non-directory/open後dev+ino race、existing targetのtype/linkとregular-target-only hardlink拒否、no-clobber競合、explicit overwrite、0600 tempと0600でpublishされた最終file、file/directory fsync、cleanup、race/I/O失敗のsanitized typed errorをnetwork不要testで固定する。POSIXでparent dir FD+relative basename+`O_NOFOLLOW|O_DIRECTORY`+`lstat`/`fstat` identity+`dir_fd` link/replace+publish後dir fsyncを検証する。親directory作成、unsafe fallback、raw path/OS error公開は行わない。 |
+| P4-03d | `todo` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
+| P4-04a | `todo` | P4-03a, P4-03d | 未定（設計時に固定） | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで設計・実装する。 |
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `git diff --check` — 成功。
+
+最初の次タスク:
+
+- P4-03aとする。pure serializerだけを先に固定し、CLI、filesystem書込み、公開READMEを触らないlow-riskな完了単位とする。
 
 ## 作業記録
 
