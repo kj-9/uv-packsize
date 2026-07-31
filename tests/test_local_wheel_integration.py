@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 from typing import cast
 
+import pytest
 from local_wheel_factory import build_wheelhouse
 
 from uv_packsize.render import format_size
@@ -392,6 +393,46 @@ def test_real_uv_local_wheel_baseline_compare_is_read_only_and_stdout_only(tmp_p
         "Comparing with baseline...\n"
     )
     assert baseline.read_bytes() == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="atomic baseline writer is POSIX-only")
+def test_real_uv_local_wheel_write_baseline_roundtrip_and_no_clobber(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    baseline = tmp_path / "baseline.json"
+
+    written = _run_cli(
+        tmp_path, wheelhouse, "--json", "--write-baseline", str(baseline)
+    )
+    assert written.returncode == 0
+    assert written.stdout.encode() == baseline.read_bytes()
+    assert stat.S_IMODE(baseline.stat().st_mode) == 0o600
+    before = baseline.read_bytes()
+
+    compared = _run_cli(tmp_path, wheelhouse, "--baseline", str(baseline))
+    comparison_json = _run_cli(
+        tmp_path, wheelhouse, "--baseline", str(baseline), "--comparison-json"
+    )
+    assert compared.returncode == comparison_json.returncode == 0
+    assert baseline.read_bytes() == before
+
+    second = _run_cli(tmp_path, wheelhouse, "--json", "--write-baseline", str(baseline))
+    assert second.returncode == 3
+    assert second.stdout == ""
+    assert "Could not write baseline (code=exists, field=file)." in second.stderr
+    assert baseline.read_bytes() == before
+
+    overwritten = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--json",
+        "--write-baseline",
+        str(baseline),
+        "--overwrite-baseline",
+    )
+    assert overwritten.returncode == 0
+    assert overwritten.stdout.encode() == baseline.read_bytes()
+    assert _run_cli(tmp_path, wheelhouse, "--baseline", str(baseline)).returncode == 0
 
 
 def test_real_uv_local_wheel_comparison_json_is_complete_and_read_only(tmp_path):

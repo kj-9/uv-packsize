@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-03d: `--write-baseline` CLI/README/local E2Eを接続する |
+| 次のタスク | P4-04a: budget pure domain modelを設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-03d: `--write-baseline` CLI/README/local E2E |
+| 次の成果物 | P4-04a: budget pure domain model |
 
 ## ステータス定義
 
@@ -872,7 +872,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-03a | `todo` | P4-03 | `uv_packsize/comparison_json_render.py`（新規）、`schemas/comparison-result-v1.schema.json`（新規）、`tests/test_comparison_json_render.py`（新規）、必要なら`tests/test_diff.py` | exactな`AnalysisDiff`だけを受ける`comparison_diff_to_json_object()`/`render_comparison_json()`とclosed `comparison-result-v1` JSON Schemaを実装する。top-levelの固定順、`input_kind`+canonical safe context fingerprint、side summary、signed totals、全distribution full outer joinのnullable sides/delta、warning code/count、`false => 0/null`・`true => nonzero/fixed reason`のnonreconciliation、int/enum/orderingをnetwork/I/Oなしのgolden/unit testで固定する。analysis JSON v1/v2とCLIを変更しない。 |
 | P4-03b | `todo` | P4-03a, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--comparison-json`を`--baseline`必須の比較表示modeとして接続する。JSON+LF-only stdout、text比較byte不変、failure時empty stdout、usage/load/operational/incompatibleの既存exit 1--4、sanitized diagnostics、loader/uvより先のoption guardをunit/local-wheel testで固定する。baseline書込み、analysis JSON schema変更、budgetは含めない。 |
 | P4-03c | `done` | P4-03 | `uv_packsize/baseline_write.py`、`tests/test_baseline_write.py`、`scripts/verify_build.py` | fresh v1 JSONのpure render/validate APIとPOSIX atomic writerをCLIなしで実装した。descriptor-relative platform featureのうち事前検査可能なAPIをI/O前に確認し、macOS等で`supports_dir_fd`へ載らない`replace`は実call failureをtypedに正規化する。Windows/dir-FD platformにはunsafe fallbackを使わずtyped unsupportedとする。non-writable parentはforeign traversal anchorとして許可し、writable parentだけはsame-effective-userかつstickyを要求する。target/temp identity、no-clobber競合、explicit overwrite、0600、file/directory fsync、cleanup、race/I/O失敗のsanitized typed errorをnetwork不要testで固定した。P4-03dでこのplatform制約をREADMEへ公開する。 |
-| P4-03d | `todo` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
+| P4-03d | `done` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
 | P4-04a | `todo` | P4-03a, P4-03d | 未定（設計時に固定） | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで設計・実装する。 |
 
 検証:
@@ -1972,6 +1972,39 @@ git diff --check
 ```
 
 結果: 成功。
+
+### 2026-07-31: P4-03d `--write-baseline` CLI/public contract
+
+状態: `done`
+
+変更:
+
+- fresh install専用の`--write-baseline PATH`と、既存targetの明示的置換用`--overwrite-baseline`をCLIへ接続した。後者だけの指定、`--prefix`または`--baseline`との併用はexternal I/O前にusage errorとなる。
+- write modeは最初の計算progressから完了表示までstderrへ送り、analysisとtext presentationの成功後、stdoutの直前にfresh baselineをrenderしてatomic writerへ一度だけ渡す。render/write失敗はpathやOS診断を出さないexit 3へ正規化し、stdoutを空にする。
+- `--json --write-baseline`はrender済みpayloadを再renderせずstdoutへ出すため、保存ファイルとstdoutのbytesは完全に一致する。通常text、`--bin`、`--explain`、`--breakdown`、`--contributions`は保存payloadを変えない。
+- READMEへwrite/no-clobber/explicit overwrite、stdout/stderrとexit 3、POSIXの0600 atomic publication、trusted parent policy、directory durabilityのplatform依存、Windows等では既存`--json > baseline.json`を使うportable fallbackを記載した。
+
+検証:
+
+```bash
+uv run --locked pytest tests/test_uv_packsize.py -q
+uv run --locked pytest tests/test_local_wheel_integration.py -q
+make ci-check
+make test
+uv lock --check
+make build
+uv run --locked python scripts/verify_build.py dist
+```
+
+結果:
+
+- CLI unit 101件、network-free local wheel integration 16件が成功した。local E2EはJSON stdout/file bytes一致、0600、直後のtext/comparison JSON read、no-clobber時の元bytes保持、explicit overwrite後の再loadを確認した。
+- text write modeは`--bin`、`--explain`、`--breakdown`、`--contributions`ごとにbaseline payloadがplain fresh v1 JSONと同一で、writerが一度だけ呼ばれ、graph optionではgraph builderも一度だけ呼ばれることを固定した。presentationまたはgraph失敗ではwriterを呼ばずtargetを作らずstdoutを空にする。`--json --write-baseline`とtext-only optionsの組合せはgraph builderを呼ばず、plain write JSONとstdout/file bytesが同一であることも固定した。
+- `make ci-check`、全696 passed/2 skippedの`make test`、`uv lock --check`、wheel/sdist build、artifact verifier、`git diff --check`も成功した。
+
+次のタスク:
+
+- P4-04aでbaseline write/readの契約を前提にbudget policyのpure domain modelを設計・実装する。
 
 ## 発見事項・後続候補
 

@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 from uv_packsize.analysis import AnalysisContextError, AnalysisContextErrorCode
 from uv_packsize.baseline import BaselineError, load_baseline
+from uv_packsize.baseline_write import BaselineWriteError
 from uv_packsize.cli import (
     UvCommandError,
     _command_failure_message,
@@ -351,18 +352,24 @@ def _run_local_layout(  # noqa: PLR0913
     allow_build=False,
     baseline=None,
     comparison_json=False,
+    write_baseline=None,
+    overwrite_baseline=False,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
 
     def create_venv(venv_dir, _python=None, *, err=False):
-        assert err is (json_output or baseline is not None)
+        assert err is (
+            json_output or baseline is not None or write_baseline is not None
+        )
         click.echo("Creating virtual environment...", err=err)
         shutil.copytree(venv_path, venv_dir, symlinks=True)
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
     def install_package(_python_executable, names, *, build_policy, err=False):
-        assert err is (json_output or baseline is not None)
+        assert err is (
+            json_output or baseline is not None or write_baseline is not None
+        )
         expected_policy = (
             BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
         )
@@ -395,7 +402,269 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.append("--allow-build")
     if baseline is not None:
         arguments.extend(("--baseline", str(baseline)))
+    if write_baseline is not None:
+        arguments.extend(("--write-baseline", str(write_baseline)))
+    if overwrite_baseline:
+        arguments.append("--overwrite-baseline")
     return CliRunner().invoke(cli, arguments)
+
+
+def test_cli_write_baseline_help_and_guards_precede_external_work(monkeypatch):
+    help_result = CliRunner().invoke(cli, ["--help"])
+    assert help_result.exit_code == 0
+    assert "--write-baseline PATH" in help_result.output
+    assert "--overwrite-baseline" in help_result.output
+
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("baseline loader must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("uv discovery must not run")
+        ),
+    )
+    cases = (
+        (["--overwrite-baseline", "sample==1.0"], "requires --write-baseline"),
+        (
+            ["--write-baseline", "out.json", "--prefix", "prefix"],
+            "--prefix cannot be used with --write-baseline.",
+        ),
+        (
+            ["--write-baseline", "out.json", "--baseline", "old.json", "sample==1.0"],
+            "--baseline cannot be used with --write-baseline.",
+        ),
+    )
+    for arguments, message in cases:
+        result = CliRunner().invoke(cli, arguments)
+        assert result.exit_code == 2
+        assert message in result.output
+
+
+def test_cli_write_baseline_json_is_stdout_exact_and_called_once(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    target = tmp_path / "baseline.json"
+    calls = []
+    real_render = __import__(
+        "uv_packsize.cli", fromlist=["render_fresh_baseline"]
+    ).render_fresh_baseline
+
+    def render_once(result):
+        calls.append(result)
+        return real_render(result)
+
+    monkeypatch.setattr("uv_packsize.cli.render_fresh_baseline", render_once)
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        write_baseline=target,
+    )
+    assert result.exit_code == 0
+    assert result.stdout.encode() == target.read_bytes()
+    assert len(calls) == 1
+    assert result.stderr.endswith("\nCalculation complete.\n")
+
+
+def test_cli_write_baseline_text_flags_keep_saved_json_and_safe_failures(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    target = tmp_path / "baseline.json"
+    plain = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], write_baseline=target
+    )
+    assert plain.exit_code == 0
+    saved = target.read_bytes()
+    assert json.loads(saved)["schema_version"] == 1
+    assert "--- Package Sizes ---" in plain.stdout
+
+    no_clobber = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], write_baseline=target
+    )
+    assert no_clobber.exit_code == 3
+    assert no_clobber.stdout == ""
+    assert "Could not write baseline (code=exists, field=file)." in no_clobber.stderr
+    assert target.read_bytes() == saved
+
+    overwrite = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        write_baseline=target,
+        overwrite_baseline=True,
+    )
+    assert overwrite.exit_code == 0
+    assert target.read_bytes() == saved
+
+    monkeypatch.setattr(
+        "uv_packsize.cli.write_baseline",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            BaselineWriteError("unsupported-platform", "file")
+        ),
+    )
+    failed = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        write_baseline=tmp_path / "bad.json",
+    )
+    assert failed.exit_code == 3
+    assert failed.stdout == ""
+    assert "code=unsupported-platform, field=file" in failed.stderr
+
+
+@pytest.mark.parametrize(
+    ("options", "report_fragment", "uses_graph"),
+    [
+        ({"show_scripts": True}, "Binaries in .venv/bin", False),
+        ({"explain": True}, "--- Requested Roots ---", True),
+        ({"breakdown": True}, "--- File Category Breakdown ---", True),
+        ({"contributions": True}, "--- Root Contributions ---", True),
+    ],
+)
+def test_cli_write_baseline_text_presentation_keeps_fresh_payload_and_writes_once(  # noqa: PLR0913
+    monkeypatch, installed_venv, tmp_path, options, report_fragment, uses_graph
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    plain = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert plain.exit_code == 0
+
+    rendered = []
+    published = []
+    graph_calls = []
+    real_render = __import__(
+        "uv_packsize.cli", fromlist=["render_fresh_baseline"]
+    ).render_fresh_baseline
+    real_graph = __import__(
+        "uv_packsize.cli", fromlist=["build_installed_dependency_graph"]
+    ).build_installed_dependency_graph
+
+    def capture_render(result):
+        payload = real_render(result)
+        rendered.append(payload)
+        return payload
+
+    def capture_write(path, payload, *, overwrite):
+        published.append((path, payload, overwrite))
+
+    def build_once(*args):
+        graph_calls.append(args)
+        return real_graph(*args)
+
+    monkeypatch.setattr("uv_packsize.cli.render_fresh_baseline", capture_render)
+    monkeypatch.setattr("uv_packsize.cli.write_baseline", capture_write)
+    monkeypatch.setattr("uv_packsize.cli.build_installed_dependency_graph", build_once)
+    target = tmp_path / "baseline.json"
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        write_baseline=target,
+        **options,
+    )
+
+    assert result.exit_code == 0
+    assert report_fragment in result.stdout
+    assert rendered == [plain.stdout.encode()]
+    assert published == [(target, plain.stdout.encode(), False)]
+    assert len(graph_calls) == int(uses_graph)
+    assert result.stderr.endswith("\nCalculation complete.\n")
+
+
+@pytest.mark.parametrize("failure_kind", ("presentation", "graph"))
+def test_cli_write_baseline_does_not_publish_after_presentation_or_graph_failure(
+    monkeypatch, installed_venv, tmp_path, failure_kind
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    published = []
+    target = tmp_path / "baseline.json"
+    monkeypatch.setattr(
+        "uv_packsize.cli.write_baseline",
+        lambda *args, **kwargs: published.append((args, kwargs)),
+    )
+    if failure_kind == "presentation":
+        failure = RuntimeError("presentation failed")
+        monkeypatch.setattr(
+            "uv_packsize.cli.render_analysis_report",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+        options = {}
+    else:
+        monkeypatch.setattr(
+            "uv_packsize.cli.build_installed_dependency_graph",
+            lambda *_args: (_ for _ in ()).throw(
+                InstalledMetadataAdapterError(
+                    InstalledMetadataAdapterErrorCode.CONTEXT_MISMATCH, "private"
+                )
+            ),
+        )
+        options = {"explain": True}
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        write_baseline=target,
+        **options,
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert not target.exists()
+    assert published == []
+    assert "Calculating size" in result.stderr
+
+
+def test_cli_json_write_baseline_ignores_text_options_without_graph_or_payload_change(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not build graph")),
+    )
+    plain_target = tmp_path / "plain.json"
+    plain = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        write_baseline=plain_target,
+    )
+    decorated_target = tmp_path / "decorated.json"
+    decorated = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        show_scripts=True,
+        explain=True,
+        breakdown=True,
+        contributions=True,
+        write_baseline=decorated_target,
+    )
+
+    assert plain.exit_code == decorated.exit_code == 0
+    assert plain.stdout == decorated.stdout
+    assert (
+        plain.stdout.encode()
+        == plain_target.read_bytes()
+        == decorated_target.read_bytes()
+    )
 
 
 def test_cli_baseline_compare_renders_only_diff_and_projects_current_directly(

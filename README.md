@@ -46,6 +46,10 @@ Options:
                                   changing it.
   --baseline PATH                 Read a baseline JSON file and report its diff
                                   from a fresh analysis.
+  --write-baseline PATH           Atomically write the fresh schema v1 analysis
+                                  JSON to PATH.
+  --overwrite-baseline            Replace an existing --write-baseline target
+                                  explicitly.
   --site-packages REL             Relative site-packages directory inside
                                   --prefix (repeatable).
   --case-rule [sensitive|insensitive]
@@ -235,6 +239,52 @@ install or analysis failures exit 1; invalid usage exits 2; baseline load or
 validation failures exit 3; and incompatible baselines exit 4. Every failure
 leaves standard output empty, so comparison JSON can be consumed safely only
 on success.
+
+### Writing a baseline
+
+For fresh-install measurements, `--write-baseline PATH` writes the same
+readable schema v1 JSON document that `--json` emits. It is useful when the
+measurement is both a CI artifact and the next comparison input:
+
+```bash
+uv-packsize requests==2.32.5 --json --write-baseline baseline.json
+uv-packsize requests==2.32.5 --baseline baseline.json
+```
+
+On success, `--json --write-baseline` writes byte-identical JSON to stdout and
+to the file (including its final newline). Text presentation options such as
+`--bin`, `--explain`, `--breakdown`, and `--contributions` only affect the
+report; they never change the saved baseline bytes. The baseline is rendered,
+validated, and published before either report or JSON is written to stdout.
+
+Publication is no-clobber by default: an existing target causes a sanitized
+exit 3 error and is left untouched. Replace a known baseline only with the
+explicit opt-in:
+
+```bash
+uv-packsize requests==2.32.5 --json \
+  --write-baseline baseline.json --overwrite-baseline
+```
+
+`--overwrite-baseline` requires `--write-baseline`. Writing is fresh-only and
+cannot be combined with `--prefix` or `--baseline` (and consequently not with
+`--comparison-json`). In write mode all progress and `Calculation complete.`
+go to stderr; stdout is only the successful final report or JSON. Render and
+write failures also use exit 3, contain only a fixed `code` and `field`, and
+leave stdout empty.
+
+The atomic writer currently supports POSIX platforms only. It creates a 0600
+temporary file in an existing trusted parent directory and atomically publishes
+it without following symlinks or replacing a target unless overwrite was
+requested. The parent-directory policy rejects symlinked, unsafe writable, or
+otherwise untrusted traversal components; choose a normal directory you own.
+Directory-entry durability after a successful publish is filesystem/platform
+dependent even when directory fsync is available. On Windows and other
+unsupported platforms, keep using the portable existing path:
+
+```bash
+uv-packsize requests==2.32.5 --json > baseline.json
+```
 
 ### Dependency explanations
 

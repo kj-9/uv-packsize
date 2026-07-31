@@ -17,6 +17,11 @@ from uv_packsize.baseline import (
     analysis_result_to_baseline,
     load_baseline,
 )
+from uv_packsize.baseline_write import (
+    BaselineWriteError,
+    render_fresh_baseline,
+    write_baseline,
+)
 from uv_packsize.comparison_json_render import render_comparison_json
 from uv_packsize.dependency_paths import explain_dependency_paths
 from uv_packsize.diff import IncompatibleComparisonError, compare_baselines
@@ -90,6 +95,12 @@ def _comparison_failure_message(error: IncompatibleComparisonError) -> str:
     """Return the fixed comparison reason without baseline contents."""
 
     return f"Baselines cannot be compared (reason={error.reason.value})."
+
+
+def _baseline_write_failure_message(error: BaselineWriteError) -> str:
+    """Return the deliberately path-free baseline publication diagnostic."""
+
+    return f"Could not write baseline (code={error.code}, field={error.field})."
 
 
 def _run_uv(command):
@@ -259,6 +270,17 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Read a baseline JSON file and report its diff from a fresh analysis.",
 )
 @click.option(
+    "--write-baseline",
+    "write_baseline_path",
+    type=click.Path(path_type=Path),
+    help="Atomically write the fresh schema v1 analysis JSON to PATH.",
+)
+@click.option(
+    "--overwrite-baseline",
+    is_flag=True,
+    help="Replace an existing --write-baseline target explicitly.",
+)
+@click.option(
     "--site-packages",
     "site_packages_relative",
     multiple=True,
@@ -316,6 +338,8 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     package_names,
     prefix,
     baseline,
+    write_baseline_path,
+    overwrite_baseline,
     site_packages_relative,
     case_rule,
     bin,
@@ -330,6 +354,10 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     """Report the size of a Python package and its dependencies using uv."""
     if comparison_json and baseline is None:
         raise click.UsageError("--comparison-json requires --baseline.")
+    if overwrite_baseline and write_baseline_path is None:
+        raise click.UsageError("--overwrite-baseline requires --write-baseline.")
+    if write_baseline_path is not None:
+        _validate_write_baseline_options(prefix=prefix, baseline=baseline)
 
     if baseline is not None:
         _validate_baseline_options(
@@ -386,9 +414,11 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
     compare_mode = comparison_baseline is not None
+    write_mode = write_baseline_path is not None
+    progress_to_stderr = json_output or compare_mode or write_mode
     click.echo(
         f"Calculating size for {package_count} requested {package_label}...",
-        err=json_output or compare_mode,
+        err=progress_to_stderr,
     )
     build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
 
@@ -396,13 +426,13 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         venv_dir = os.path.join(tmpdir, "venv")
         try:
             python_executable = _create_venv(
-                venv_dir, python_version, err=json_output or compare_mode
+                venv_dir, python_version, err=progress_to_stderr
             )
             _install_package(
                 python_executable,
                 package_names,
                 build_policy=build_policy,
-                err=json_output or compare_mode,
+                err=progress_to_stderr,
             )
             uv_version = _uv_version()
         except UvCommandError as error:
@@ -412,7 +442,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         except UvVersionError:
             raise click.ClickException("Could not determine the uv version.") from None
 
-        click.echo("Analyzing sizes...", err=json_output or compare_mode)
+        click.echo("Analyzing sizes...", err=progress_to_stderr)
         try:
             environment = discover_installed_environment(
                 venv_path=Path(venv_dir),
@@ -465,10 +495,22 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         # with JSON: this keeps stdout, stderr, and failures identical to
         # --json alone.
         if json_output:
-            click.echo(render_analysis_json(result), nl=False)
+            if write_mode:
+                try:
+                    payload = render_fresh_baseline(result)
+                    write_baseline(
+                        write_baseline_path, payload, overwrite=overwrite_baseline
+                    )
+                except BaselineWriteError as error:
+                    raise _BaselineClickError(
+                        _baseline_write_failure_message(error)
+                    ) from None
+                click.echo(payload.decode("utf-8"), nl=False)
+            else:
+                click.echo(render_analysis_json(result), nl=False)
         elif explain or breakdown or contributions:
             if explain:
-                click.echo("Explaining dependencies...")
+                click.echo("Explaining dependencies...", err=write_mode)
             try:
                 graph = build_installed_dependency_graph(result, environment)
                 explained = explain_dependency_paths(result, graph)
@@ -505,15 +547,46 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                         include_graph_warning_summary=not graph_warning_rendered,
                     )
                 )
-            click.echo(
-                "\n\n".join(
-                    (render_analysis_report(result, show_scripts=bin), *sections)
-                )
+            report = "\n\n".join(
+                (render_analysis_report(result, show_scripts=bin), *sections)
             )
+            _write_fresh_baseline_if_requested(
+                write_baseline_path, result, overwrite_baseline
+            )
+            click.echo(report)
         else:
-            click.echo(render_analysis_report(result, show_scripts=bin))
+            report = render_analysis_report(result, show_scripts=bin)
+            _write_fresh_baseline_if_requested(
+                write_baseline_path, result, overwrite_baseline
+            )
+            click.echo(report)
 
-    click.echo("\nCalculation complete.", err=json_output)
+    click.echo("\nCalculation complete.", err=json_output or write_mode)
+
+
+def _write_fresh_baseline_if_requested(
+    path: Path | None, result, overwrite: bool
+) -> None:
+    """Render and publish only after all text presentation has succeeded."""
+
+    if path is None:
+        return
+    try:
+        payload = render_fresh_baseline(result)
+        write_baseline(path, payload, overwrite=overwrite)
+    except BaselineWriteError as error:
+        raise _BaselineClickError(_baseline_write_failure_message(error)) from None
+
+
+def _validate_write_baseline_options(
+    *, prefix: Path | None, baseline: Path | None
+) -> None:
+    """Reject non-fresh modes before any baseline or external I/O."""
+
+    if prefix is not None:
+        raise click.UsageError("--prefix cannot be used with --write-baseline.")
+    if baseline is not None:
+        raise click.UsageError("--baseline cannot be used with --write-baseline.")
 
 
 def _validate_baseline_options(  # noqa: PLR0913
