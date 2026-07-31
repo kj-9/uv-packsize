@@ -366,6 +366,34 @@ def test_real_uv_install_from_local_wheels_emits_complete_schema_v1_json(tmp_pat
     }
 
 
+def test_real_uv_local_wheel_baseline_compare_is_read_only_and_stdout_only(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    baseline = tmp_path / "baseline.json"
+    recorded = _run_cli(tmp_path, wheelhouse, "--json")
+    assert recorded.returncode == 0
+    baseline.write_text(recorded.stdout)
+    before = baseline.read_bytes()
+
+    completed = _run_cli(tmp_path, wheelhouse, "--baseline", str(baseline))
+
+    assert completed.returncode == 0
+    assert completed.stdout.startswith("--- Size Comparison ---\n")
+    assert "Global logical size" in completed.stdout
+    assert "Distribution-owned aggregate" in completed.stdout
+    assert "0 B" in completed.stdout
+    assert "--- Distribution Changes ---\nNo distribution changes." in completed.stdout
+    assert "Calculating size" not in completed.stdout
+    assert completed.stderr == (
+        "Calculating size for 2 requested packages...\n"
+        "Creating virtual environment...\n"
+        "Installing 2 requested packages and their dependencies...\n"
+        "Analyzing sizes...\n"
+        "Comparing with baseline...\n"
+    )
+    assert baseline.read_bytes() == before
+
+
 def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
     tmp_path,
 ):

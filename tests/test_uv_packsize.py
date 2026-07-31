@@ -13,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from uv_packsize.analysis import AnalysisContextError, AnalysisContextErrorCode
+from uv_packsize.baseline import BaselineError, load_baseline
 from uv_packsize.cli import (
     UvCommandError,
     _command_failure_message,
@@ -21,6 +22,10 @@ from uv_packsize.cli import (
     _run_uv,
     _uv_version,
     cli,
+)
+from uv_packsize.diff import (
+    ComparisonIncompatibilityReason,
+    IncompatibleComparisonError,
 )
 from uv_packsize.environment import (
     EnvironmentDiscoveryError,
@@ -343,18 +348,19 @@ def _run_local_layout(  # noqa: PLR0913
     breakdown=False,
     contributions=False,
     allow_build=False,
+    baseline=None,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
 
     def create_venv(venv_dir, _python=None, *, err=False):
-        assert err is json_output
+        assert err is (json_output or baseline is not None)
         click.echo("Creating virtual environment...", err=err)
         shutil.copytree(venv_path, venv_dir, symlinks=True)
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
     def install_package(_python_executable, names, *, build_policy, err=False):
-        assert err is json_output
+        assert err is (json_output or baseline is not None)
         expected_policy = (
             BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
         )
@@ -383,7 +389,253 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.append("--contributions")
     if allow_build:
         arguments.append("--allow-build")
+    if baseline is not None:
+        arguments.extend(("--baseline", str(baseline)))
     return CliRunner().invoke(cli, arguments)
+
+
+def test_cli_baseline_compare_renders_only_diff_and_projects_current_directly(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    captured = []
+    original = __import__(
+        "uv_packsize.cli", fromlist=["analyze_installed_environment"]
+    ).analyze_installed_environment
+
+    def capture(**kwargs):
+        result = original(**kwargs)
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr("uv_packsize.cli.analyze_installed_environment", capture)
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert initial.exit_code == 0
+    baseline.write_text(initial.stdout)
+    before = baseline.read_bytes()
+    baseline_loads = []
+    real_load = load_baseline
+
+    def load_once(path):
+        baseline_loads.append(path)
+        return real_load(path)
+
+    monkeypatch.setattr("uv_packsize.cli.load_baseline", load_once)
+    monkeypatch.setattr(
+        "uv_packsize.cli.render_analysis_json",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not serialize")),
+    )
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], baseline=baseline
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("--- Size Comparison ---\n")
+    assert "Calculating size" not in result.stdout
+    assert "Calculation complete" not in result.stdout
+    assert result.stderr == (
+        "Calculating size for 1 requested package...\n"
+        "Creating virtual environment...\n"
+        "Installing 1 requested package and its dependencies...\n"
+        "Analyzing sizes...\n"
+        "Comparing with baseline...\n"
+    )
+    assert baseline.read_bytes() == before
+    assert baseline_loads == [baseline]
+    assert len(captured) == 2
+
+
+@pytest.mark.parametrize(
+    "option",
+    ["--prefix", "--json", "--bin", "--explain", "--breakdown", "--contributions"],
+)
+def test_cli_baseline_option_guards_precede_loader_and_uv(monkeypatch, option):
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not load")),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not inspect uv")),
+    )
+    arguments = ["--baseline", "private-baseline.json", option]
+    if option == "--prefix":
+        arguments.extend(("/private/prefix", "sample==1.0"))
+    else:
+        arguments.append("sample==1.0")
+
+    result = CliRunner().invoke(cli, arguments)
+
+    assert result.exit_code == 2
+    assert f"{option} cannot be used with --baseline." in result.output
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        (
+            ("--baseline", "private-baseline.json"),
+            "Missing argument 'PACKAGE_NAMES...'",
+        ),
+        (
+            (
+                "--baseline",
+                "private-baseline.json",
+                "--site-packages",
+                "lib/site",
+                "sample==1.0",
+            ),
+            "--site-packages and --case-rule require --prefix.",
+        ),
+        (
+            (
+                "--baseline",
+                "private-baseline.json",
+                "--case-rule",
+                "sensitive",
+                "sample==1.0",
+            ),
+            "--site-packages and --case-rule require --prefix.",
+        ),
+    ],
+)
+def test_cli_baseline_shared_fresh_guards_precede_loader_and_uv(
+    monkeypatch, arguments, message
+):
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not load")),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not inspect uv")),
+    )
+
+    result = CliRunner().invoke(cli, list(arguments))
+
+    assert result.exit_code == 2
+    assert message in result.output
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [BaselineError("read-failed", "file"), BaselineError("malformed-json", "document")],
+)
+def test_cli_baseline_load_failures_are_safe_and_typed(monkeypatch, failure):
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+    result = CliRunner().invoke(
+        cli, ["--baseline", "/private/secret-baseline.json", "sample==1.0"]
+    )
+
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    assert "secret-baseline" not in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "code=" in result.stderr and "field=" in result.stderr
+
+
+def test_cli_baseline_context_mismatch_is_safe_exit_four(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "private-baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert initial.exit_code == 0
+    baseline.write_text(initial.stdout)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        allow_build=True,
+    )
+
+    assert result.exit_code == 4
+    assert result.stdout == ""
+    assert "reason=context-mismatch" in result.stderr
+    for unsafe in ("private-baseline", "sample==1.0", "Traceback"):
+        assert unsafe not in result.stderr
+
+
+@pytest.mark.parametrize("reason", list(ComparisonIncompatibilityReason))
+def test_cli_baseline_maps_each_incompatibility_reason_to_exit_four(
+    monkeypatch, installed_venv, tmp_path, reason
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert initial.exit_code == 0
+    baseline.write_text(initial.stdout)
+    monkeypatch.setattr(
+        "uv_packsize.cli.compare_baselines",
+        lambda *_args: (_ for _ in ()).throw(IncompatibleComparisonError(reason)),
+    )
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], baseline=baseline
+    )
+
+    assert result.exit_code == 4
+    assert result.stdout == ""
+    assert f"reason={reason.value}" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_baseline_operational_failure_keeps_stdout_empty(monkeypatch):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+    monkeypatch.setattr("uv_packsize.cli.load_baseline", lambda _path: object())
+    monkeypatch.setattr(
+        "uv_packsize.cli._create_venv",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            UvCommandError(("uv", "venv"), 9, "", "private diagnostic")
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["--baseline", "baseline.json", "sample==1.0"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Calculating size" in result.stderr
+    assert "Could not create the virtual environment (uv exit code 9)." in result.stderr
+    assert "private diagnostic" not in result.stderr
+
+
+def test_cli_baseline_incomplete_comparison_is_successful_and_partial(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    source = _add_distribution(
+        venv_path=venv_path, site_packages=site_packages, name="sample"
+    )
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert initial.exit_code == 0
+    baseline.write_text(initial.stdout)
+    source.unlink()
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], baseline=baseline
+    )
+
+    assert result.exit_code == 0
+    assert "Warning: incomplete comparison; deltas may be partial" in result.stdout
 
 
 def _reported_total(output):

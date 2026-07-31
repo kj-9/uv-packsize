@@ -12,7 +12,14 @@ from pathlib import Path
 import click
 
 from uv_packsize.analysis import AnalysisContextError, analyze_installed_environment
+from uv_packsize.baseline import (
+    BaselineError,
+    analysis_result_to_baseline,
+    load_baseline,
+)
 from uv_packsize.dependency_paths import explain_dependency_paths
+from uv_packsize.diff import IncompatibleComparisonError, compare_baselines
+from uv_packsize.diff_render import render_diff_report
 from uv_packsize.environment import (
     EnvironmentDiscoveryError,
     discover_installed_environment,
@@ -56,6 +63,32 @@ class UvCommandError(Exception):
 
 class UvVersionError(ValueError):
     """The ``uv --version`` response was not a safe version value."""
+
+
+class _BaselineClickError(click.ClickException):
+    """A typed public boundary for safe baseline failures."""
+
+    exit_code = 3
+
+
+class _ComparisonClickError(click.ClickException):
+    """A typed public boundary for safe comparison incompatibilities."""
+
+    exit_code = 4
+
+
+def _baseline_failure_message(error: BaselineError) -> str:
+    """Return a diagnostic containing only fixed baseline identifiers."""
+
+    if error.field == "file":
+        return f"Could not load baseline (code={error.code}, field=file)."
+    return f"Could not validate baseline (code={error.code}, field={error.field})."
+
+
+def _comparison_failure_message(error: IncompatibleComparisonError) -> str:
+    """Return the fixed comparison reason without baseline contents."""
+
+    return f"Baselines cannot be compared (reason={error.reason.value})."
 
 
 def _run_uv(command):
@@ -220,6 +253,11 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Analyze an existing prefix without running or changing it.",
 )
 @click.option(
+    "--baseline",
+    type=click.Path(path_type=Path),
+    help="Read a baseline JSON file and report its diff from a fresh analysis.",
+)
+@click.option(
     "--site-packages",
     "site_packages_relative",
     multiple=True,
@@ -271,6 +309,7 @@ def _explanation_failure_message(error: Exception) -> str:
 def cli(  # noqa: PLR0912, PLR0913, PLR0915
     package_names,
     prefix,
+    baseline,
     site_packages_relative,
     case_rule,
     bin,
@@ -282,6 +321,27 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     python_version,
 ):
     """Report the size of a Python package and its dependencies using uv."""
+    if baseline is not None:
+        _validate_baseline_options(
+            prefix=prefix,
+            json_output=json_output,
+            bin=bin,
+            explain=explain,
+            breakdown=breakdown,
+            contributions=contributions,
+        )
+        _validate_baseline_fresh_usage(
+            package_names=package_names,
+            site_packages_relative=site_packages_relative,
+            case_rule=case_rule,
+        )
+        try:
+            comparison_baseline = load_baseline(baseline)
+        except BaselineError as error:
+            raise _BaselineClickError(_baseline_failure_message(error)) from None
+    else:
+        comparison_baseline = None
+
     if prefix is not None:
         _validate_prefix_options(
             package_names=package_names,
@@ -315,21 +375,24 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
 
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
+    compare_mode = comparison_baseline is not None
     click.echo(
         f"Calculating size for {package_count} requested {package_label}...",
-        err=json_output,
+        err=json_output or compare_mode,
     )
     build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
         try:
-            python_executable = _create_venv(venv_dir, python_version, err=json_output)
+            python_executable = _create_venv(
+                venv_dir, python_version, err=json_output or compare_mode
+            )
             _install_package(
                 python_executable,
                 package_names,
                 build_policy=build_policy,
-                err=json_output,
+                err=json_output or compare_mode,
             )
             uv_version = _uv_version()
         except UvCommandError as error:
@@ -339,7 +402,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         except UvVersionError:
             raise click.ClickException("Could not determine the uv version.") from None
 
-        click.echo("Analyzing sizes...", err=json_output)
+        click.echo("Analyzing sizes...", err=json_output or compare_mode)
         try:
             environment = discover_installed_environment(
                 venv_path=Path(venv_dir),
@@ -362,6 +425,22 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             InventoryError,
         ) as error:
             raise click.ClickException(_analysis_failure_message(error)) from None
+
+        if comparison_baseline is not None:
+            click.echo("Comparing with baseline...", err=True)
+            try:
+                current_baseline = analysis_result_to_baseline(result)
+                diff = compare_baselines(comparison_baseline, current_baseline)
+            except IncompatibleComparisonError as error:
+                raise _ComparisonClickError(
+                    _comparison_failure_message(error)
+                ) from None
+            except ValueError:
+                raise click.ClickException(
+                    "Could not compare the analysis result."
+                ) from None
+            click.echo(render_diff_report(diff))
+            return
 
         # JSON v1 remains a strict compatibility boundary.  In particular, do
         # not inspect installed metadata when text-only options are combined
@@ -417,6 +496,43 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             click.echo(render_analysis_report(result, show_scripts=bin))
 
     click.echo("\nCalculation complete.", err=json_output)
+
+
+def _validate_baseline_options(  # noqa: PLR0913
+    *,
+    prefix: Path | None,
+    json_output: bool,
+    bin: bool,
+    explain: bool,
+    breakdown: bool,
+    contributions: bool,
+) -> None:
+    """Reject comparison-incompatible options before file or process I/O."""
+
+    for enabled, option in (
+        (prefix is not None, "--prefix"),
+        (json_output, "--json"),
+        (bin, "--bin"),
+        (explain, "--explain"),
+        (breakdown, "--breakdown"),
+        (contributions, "--contributions"),
+    ):
+        if enabled:
+            raise click.UsageError(f"{option} cannot be used with --baseline.")
+
+
+def _validate_baseline_fresh_usage(
+    *,
+    package_names: tuple[str, ...],
+    site_packages_relative: tuple[str, ...],
+    case_rule: str | None,
+) -> None:
+    """Apply fresh-input usage checks before reading a comparison baseline."""
+
+    if site_packages_relative or case_rule is not None:
+        raise click.UsageError("--site-packages and --case-rule require --prefix.")
+    if not package_names:
+        raise click.UsageError("Missing argument 'PACKAGE_NAMES...'.")
 
 
 def _validate_prefix_options(  # noqa: PLR0913

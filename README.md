@@ -44,6 +44,8 @@ Options:
   --version                       Show the version and exit.
   --prefix PATH                   Analyze an existing prefix without running or
                                   changing it.
+  --baseline PATH                 Read a baseline JSON file and report its diff
+                                  from a fresh analysis.
   --site-packages REL             Relative site-packages directory inside
                                   --prefix (repeatable).
   --case-rule [sensitive|insensitive]
@@ -186,6 +188,36 @@ the schema v1 compatibility boundary.
 `--breakdown` and `--contributions` follow the same rule, including when
 combined with other text-only options:
 all `--json` combinations preserve the same schema v1 bytes as `--json` alone.
+
+### Baseline comparison
+
+Record a schema v1 fresh-install measurement with `--json`, then compare a new
+fresh measurement to that read-only file:
+
+```bash
+uv-packsize requests==2.32.5 --json > baseline.json
+uv-packsize requests==2.32.5 --baseline baseline.json
+```
+
+Comparison writes only the text diff report to standard output; progress and
+errors go to standard error. The baseline file is never modified. The two
+measurements must use the same measurement definition and resolution context
+(including requirements, Python/platform fingerprints, build policy, and
+resolver conditions). Existing-prefix schema v2 baselines are deliberately not
+comparable yet.
+
+The report shows both the deduplicated global logical-size change and the
+distribution-owned aggregate change. They can differ when multiple
+distributions own the same installed file: global totals count each canonical
+file once, while distribution totals retain ownership. Incomplete but
+comparable inputs still exit successfully and label their deltas as partial.
+
+Comparison does not offer JSON output yet, so `--baseline` is mutually
+exclusive with `--json`, `--prefix`, `--bin`, `--explain`, `--breakdown`, and
+`--contributions`. A completed comparison (including an incomplete one) exits
+0; regular install or analysis failures exit 1; invalid usage exits 2;
+baseline load or validation failures exit 3; and incompatible baselines exit
+4.
 
 ### Dependency explanations
 

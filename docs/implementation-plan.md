@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-02b2: compare CLI/read boundaryを実装する |
+| 次のタスク | P4-03: diff JSON/baseline write contractを分離して設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-02b2: compare CLI/read boundary |
+| 次の成果物 | P4-03: diff JSON/baseline write contract |
 
 ## ステータス定義
 
@@ -233,7 +233,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-01b | Phase 4 | baseline間のpure diff modelを実装する | `done` |
 | P4-02a | Phase 4 | diff text rendererをCLI未接続で実装する | `done` |
 | P4-02b1 | Phase 4 | current `AnalysisResult`からsafe baseline comparison projectionを実装する | `done` |
-| P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `todo` |
+| P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `done` |
+| P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -820,6 +821,31 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 引き継ぎ:
 
 - 次のタスクはP4-02b2とする。baseline read/compare error boundaryとCLI表示を接続する。
+
+### 2026-07-31: P4-02b2 compare CLI/read boundary
+
+状態: `done`
+
+実装:
+
+- 既存single commandへ`--baseline PATH`を追加した。比較と排他となる`--prefix`、`--json`、`--bin`、`--explain`、`--breakdown`、`--contributions`はbaseline load、`uv`検出、temporary environment作成より先に固定順でusage errorへ正規化する。`--python`、`--allow-build`、package inputはcurrent測定として許可した。
+- guard通過後はbaselineを一度だけread-onlyでloadし、baseline load/parse/semantic failureをsafeな`code`/`field`だけのexit 3へ変換する。比較不能はpure policyのreasonをそのままsafe identifierとしてexit 4へ変換する。既存のoperational failureはexit 1、usage errorはexit 2のままである。
+- current `AnalysisResult`はserialize/parseせず`analysis_result_to_baseline()`、`compare_baselines()`、`render_diff_report()`へ直接渡す。比較成功時のstdoutはdiff reportだけで、全progressはstderrへ出す。incompleteでも比較可能ならpartial warning付きexit 0とする。baseline fileは書き換えない。
+- READMEにread-only使用例、schema v1/context requirement、v2 existing-prefix未対応、global canonical totalとdistribution aggregateの差、incomplete partial、compare JSON未提供、exit 0--4を追記した。既存JSON schema v1/v2の出力分岐は変更していない。
+
+テスト:
+
+- unitではhelp、direct projector（serializer未使用）、stdout/stderr、baseline不変、loader一度だけのread、baseline conflictとshared fresh usage guardがloader/uvより先であること、safeなexit 3、actual context mismatchと全incompatibility reasonのexit 4、current operational exit 1、incomplete comparable resultのpartial warning付きexit 0を検証した。network-free local wheel E2Eでは同CLIの`--json`で生成したbaselineとのcompare、stdout/stderr分離、baseline byte不変を検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_local_wheel_integration.py -q` — 成功（96 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check`、`make test` — 成功（650 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+引き継ぎ:
+
+- 次のタスクはP4-03とする。budget policyの前に、baseline writeとversioned diff JSONの公開契約を小さく分離して設計する。DoDは、read-only compare text/既存analysis JSON v1/v2を不変にしたまま、書込みの明示opt-in・atomicity・overwrite方針、diff schema version/安全なfield、JSON成功/失敗stdout契約、unit testを固定すること。budget enforcement、config file、CI workflowは含めない。
 
 ## 作業記録
 
