@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-04b: budget text/result presentation contractをpureに設計・実装する |
+| 次のタスク | P4-04c: budget policy inputのpure parser/normalizer contractを設計・実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-04b: budget text/result presentation contract |
+| 次の成果物 | P4-04c: trusted policy mappingから`BudgetPolicy`へのpure parser/normalizer |
 
 ## ステータス定義
 
@@ -240,7 +240,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `done` |
 | P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `done` |
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `done` |
-| P4-04b | Phase 4 | budget text/result presentation contractをpureに設計・実装する | `todo` |
+| P4-04b | Phase 4 | budget text/result presentation contractをpureに設計・実装する | `done` |
+| P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -875,7 +876,8 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-03c | `done` | P4-03 | `uv_packsize/baseline_write.py`、`tests/test_baseline_write.py`、`scripts/verify_build.py` | fresh v1 JSONのpure render/validate APIとPOSIX atomic writerをCLIなしで実装した。descriptor-relative platform featureのうち事前検査可能なAPIをI/O前に確認し、macOS等で`supports_dir_fd`へ載らない`replace`は実call failureをtypedに正規化する。Windows/dir-FD platformにはunsafe fallbackを使わずtyped unsupportedとする。non-writable parentはforeign traversal anchorとして許可し、writable parentだけはsame-effective-userかつstickyを要求する。target/temp identity、no-clobber競合、explicit overwrite、0600、file/directory fsync、cleanup、race/I/O失敗のsanitized typed errorをnetwork不要testで固定した。P4-03dでこのplatform制約をREADMEへ公開する。 |
 | P4-03d | `done` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
 | P4-04a | `done` | P4-03a, P4-03d | `uv_packsize/budget.py`（新規）、`tests/test_budget.py`（新規）、`scripts/verify_build.py` | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで実装した。 |
-| P4-04b | `todo` | P4-04a | `uv_packsize/budget_render.py`（新規）、`tests/test_budget_render.py`（新規） | exactな`BudgetEvaluation`を入力に、safeでdeterministicなtext/result presentation contractをpureに固定する。CLI/config/JSON schema/exit codeは変更しない。 |
+| P4-04b | `done` | P4-04a | `uv_packsize/budget_render.py`（新規）、`tests/test_budget_render.py`（新規）、`scripts/verify_build.py` | exactな`BudgetEvaluation`だけを再検証して受けるsafeかつdeterministicなtext presentationを実装した。canonical global authority、configured metric、no-op、completeness policy、fixed violation orderをpureに表示し、CLI/config/JSON schema/exit codeは変更しない。 |
+| P4-04c | `todo` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`docs/implementation-plan.md` | policy入力のpure parser/normalizer契約を固定する。trusted mappingから`BudgetPolicy`への変換、unknown/type/range/incomplete policy errorのsanitized typed error、empty policyを検証し、CLI、`pyproject.toml` I/O、exit code、CIは接続しない。 |
 
 検証:
 
@@ -884,9 +886,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P4-04bとする。P4-04aのpure evaluationを安全でdeterministicなtext/result presentationへ分離して固定し、その後にpolicyのCLI/config入力、exit code、CI exampleを順に接続する。
+- P4-04cとする。trusted policy inputのpure parser/normalizerを先に固定し、その後にCLI/config file I/O、exit code、CI exampleを独立した完了単位として接続する。
 
 ## 作業記録
+
+### 2026-07-31: P4-04b budget pure text presentation
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/budget_render.py`に、exactな`BudgetEvaluation`をimmutable modelの`__post_init__`で再検証してから受ける`render_budget_report()`とsection-onlyの`render_budget_sections()`を追加した。subclassまたはobject forgeryはraw inputを反射しない固定エラーで拒否する。
+- reportはcanonical global logical bytesだけがauthorityでありdistribution-owned aggregateはbudget inputではないことを明記する。total/increaseともconfigured時だけ表示し、totalはnon-negative size、increaseのobservedはsigned size、remaining/excessはdeterministicなbinary unitで表示する。
+- no-op policy、current/comparison completeness、`fail`/`allow-partial`、PASS/FAIL、canonical orderのviolation sectionを明示する。evaluationがbaseline/diff graphを保持しない境界を維持し、reportはterminal-safe fixed textとscalarだけで構成され、末尾LFを付加しない。
+- artifact verifierへ`budget_render.py`を追加した。CLI/config/JSON schema/exit code/READMEは変更していない。
+
+テスト:
+
+- no-op、totalのremaining/excess、negative increaseのsigned/headroom、both limitのviolation order、incomplete FAIL/ALLOW、PASS時のviolation section非表示、section/report equivalence、wrong type/subclass/object forgery、byte determinismとbaseline detail非露出をnetwork/I/Oなしで検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_budget.py tests/test_budget_render.py -q` — 成功（35 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked ruff format --check uv_packsize/budget_render.py tests/test_budget_render.py`、`uv run --locked ruff check uv_packsize/budget_render.py tests/test_budget_render.py`、`uv run --locked ty check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（731 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。wheel/sdistへの新module含有、artifact metadata、installed entry pointを検証した。
+
+次のタスク:
+
+- P4-04cでpolicy inputのpure parser/normalizer契約を固定する。CLI/config file I/O、exit code、CI exampleはこの段階では接続しない。
 
 ### 2026-07-31: P4-04a budget pure domain model
 
