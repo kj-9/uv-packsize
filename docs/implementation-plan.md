@@ -238,7 +238,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `done` |
 | P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `done` |
 | P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `done` |
-| P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `todo` |
+| P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `done` |
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
