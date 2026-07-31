@@ -18,6 +18,7 @@ CRITICAL_MODULES = {
     "uv_packsize/__init__.py",
     "uv_packsize/__main__.py",
     "uv_packsize/baseline.py",
+    "uv_packsize/baseline_write.py",
     "uv_packsize/comparison_json_render.py",
     "uv_packsize/diff.py",
     "uv_packsize/diff_render.py",

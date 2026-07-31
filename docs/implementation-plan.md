@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-03c: fresh baselineのpure render/atomic writerを実装する |
+| 次のタスク | P4-03d: `--write-baseline` CLI/README/local E2Eを接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-03c: fresh baselineのpure render/atomic writer |
+| 次の成果物 | P4-03d: `--write-baseline` CLI/README/local E2E |
 
 ## ステータス定義
 
@@ -237,7 +237,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `done` |
 | P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `done` |
 | P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `done` |
-| P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `todo` |
+| P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `done` |
 | P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `todo` |
 | P4-04a | Phase 4 | budget policyのpure domain modelを設計・実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -871,7 +871,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 |---|---|---|---|---|
 | P4-03a | `todo` | P4-03 | `uv_packsize/comparison_json_render.py`（新規）、`schemas/comparison-result-v1.schema.json`（新規）、`tests/test_comparison_json_render.py`（新規）、必要なら`tests/test_diff.py` | exactな`AnalysisDiff`だけを受ける`comparison_diff_to_json_object()`/`render_comparison_json()`とclosed `comparison-result-v1` JSON Schemaを実装する。top-levelの固定順、`input_kind`+canonical safe context fingerprint、side summary、signed totals、全distribution full outer joinのnullable sides/delta、warning code/count、`false => 0/null`・`true => nonzero/fixed reason`のnonreconciliation、int/enum/orderingをnetwork/I/Oなしのgolden/unit testで固定する。analysis JSON v1/v2とCLIを変更しない。 |
 | P4-03b | `todo` | P4-03a, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--comparison-json`を`--baseline`必須の比較表示modeとして接続する。JSON+LF-only stdout、text比較byte不変、failure時empty stdout、usage/load/operational/incompatibleの既存exit 1--4、sanitized diagnostics、loader/uvより先のoption guardをunit/local-wheel testで固定する。baseline書込み、analysis JSON schema変更、budgetは含めない。 |
-| P4-03c | `todo` | P4-03 | `uv_packsize/baseline.py`、`tests/test_baseline.py` | fresh v1 JSONのpure render/validate APIとatomic writerをCLIなしで実装する。既存serializer bytesとの一致、decoder/projector parity、8 MiB境界、parent symlink/non-directory/open後dev+ino race、existing targetのtype/linkとregular-target-only hardlink拒否、no-clobber競合、explicit overwrite、0600 tempと0600でpublishされた最終file、file/directory fsync、cleanup、race/I/O失敗のsanitized typed errorをnetwork不要testで固定する。POSIXでparent dir FD+relative basename+`O_NOFOLLOW|O_DIRECTORY`+`lstat`/`fstat` identity+`dir_fd` link/replace+publish後dir fsyncを検証する。親directory作成、unsafe fallback、raw path/OS error公開は行わない。 |
+| P4-03c | `done` | P4-03 | `uv_packsize/baseline_write.py`、`tests/test_baseline_write.py`、`scripts/verify_build.py` | fresh v1 JSONのpure render/validate APIとPOSIX atomic writerをCLIなしで実装した。descriptor-relative platform featureのうち事前検査可能なAPIをI/O前に確認し、macOS等で`supports_dir_fd`へ載らない`replace`は実call failureをtypedに正規化する。Windows/dir-FD platformにはunsafe fallbackを使わずtyped unsupportedとする。non-writable parentはforeign traversal anchorとして許可し、writable parentだけはsame-effective-userかつstickyを要求する。target/temp identity、no-clobber競合、explicit overwrite、0600、file/directory fsync、cleanup、race/I/O失敗のsanitized typed errorをnetwork不要testで固定した。P4-03dでこのplatform制約をREADMEへ公開する。 |
 | P4-03d | `todo` | P4-03c, P4-02b2 | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py` | `--write-baseline PATH`/`--overwrite-baseline`をpublic contractへ接続する。初回progressからstderr、fresh-only/排他usage guard、write-before-report/JSON stdout、failure時exit 3/empty stdout、`--json` stdout=file exact bytes、text flags非影響、no-clobber/overwrite、offline local-wheel write→compare roundtripと既存redirect経路を検証する。comparison JSON、budget、config/CIは含めない。 |
 | P4-04a | `todo` | P4-03a, P4-03d | 未定（設計時に固定） | `AnalysisDiff`とbaseline write/readの契約を前提に、budget policyのpure domain model、incomplete/nonreconciliationの判断、typed violationをCLI/config/CIなしで設計・実装する。 |
 
@@ -885,6 +885,32 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P4-03aとする。pure serializerだけを先に固定し、CLI、filesystem書込み、公開READMEを触らないlow-riskな完了単位とする。
 
 ## 作業記録
+
+### 2026-07-31: P4-03c fresh baseline pure render/atomic writer
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/baseline_write.py`に、exactなfresh `AnalysisResult`/`ResolutionContext`だけを受ける`render_fresh_baseline()`を追加した。既存`render_analysis_json(..., schema_version=1)`のUTF-8 bytes（末尾LFを含む）をそのまま使用し、8 MiB上限と`parse_baseline_json()`/`analysis_result_to_baseline()` parityをI/Oなしで再検証する。serializer、encoding、projection失敗はraw値を反射しない`BaselineWriteError(code, field)`へ正規化する。
+- `write_baseline()`はpayload validation後、POSIX、`O_DIRECTORY`、`O_NOFOLLOW`、事前検査可能なrequired `dir_fd` APIsをI/O前に検証する。macOS等で`supports_dir_fd`へ載らない`replace`は実call failureをtypedに正規化する。cwd/root anchorからparent componentを`lstat`、descriptor-relative open、`fstat` identity照合でwalkする。非group/world-writable parentは所有者を問わずtrusted traversal anchorとして許可し、writable parentだけはsticky bitかつeffective UID所有を要求する。既存parentのみを許可し、symlink/non-directory/identity変更、unsafe path component、symlink/special/hardlinked/untrusted targetを拒否する。
+- 同一parentのexclusive random 0600 tempはFDをpublishまで保持する。create直後とpublish直前にdescriptorとdirectory entryのdev/inode、regular type、link countを照合し、交換を`changed-temp`として拒否する。partial/EINTR対応write、chmod、file fsync、close、atomic hard-link no-clobberまたはtarget identity再照合後のatomic replace、最終regular/0600検証、parent fsyncを行う。cleanup/close失敗は主失敗をmaskせず、commit後はrollbackせず`committed-cleanup-failed`へ正規化する。
+- Windows/dir-FD非対応platformには同等のrace guaranteeを満たすstdlib fallbackを実装できないため、`unsupported-platform`で失敗する。当初設計のWindows atomic visibilityは安全側に縮小した実装上の発見であり、P4-03dのREADME/public contractで明記する。artifact verifierへ新moduleを追加した。
+
+テスト:
+
+- `tests/test_baseline_write.py`で既存JSONとのbyte一致、parse/projector parity、non-fresh/serializer privacy、invalid/oversize payload、roundtrip、no-clobber/overwrite、0600、target/parent symlink・directory拒否、I/O前feature gate、replace unsupported、partial/EINTR write、write failure cleanup/original保存、directory fsync failure後のpublished file保持、type boundaryをnetwork不要で検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_baseline.py tests/test_baseline_write.py` — 55 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 685 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P4-03dで`--write-baseline`/`--overwrite-baseline`のCLI、README、local E2Eを接続する。
 
 ### 2026-07-31: P4-03b `--comparison-json` CLI/public contract
 
@@ -1960,3 +1986,4 @@ git diff --check
 | F-005 | sdist build backendを暗黙に実行する可能性がある | P2-07 | `done` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない | P6-01（上流連携） | `todo` |
+| F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
