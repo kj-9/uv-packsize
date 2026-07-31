@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "measurement": {
+    "kind": "installed-logical-size",
+    "unit": "bytes",
+    "ownership": "distribution-owned-files",
+    "deduplication": "canonical-identity"
+  },
+  "context": {
+    "input_kind": "fresh-install",
+    "comparison_context_fingerprint": "957e67d17071a52aacdb6cff5dd6eae0408a69b3eb1bc085a23b7914789787d2"
+  },
+  "baseline": {
+    "totals": {
+      "global_logical_bytes": 41,
+      "distribution_logical_bytes": 48
+    },
+    "completeness": "incomplete",
+    "warning_code_counts": [
+      {"code": "duplicate-ownership", "count": 1},
+      {"code": "missing-file", "count": 1},
+      {"code": "missing-record", "count": 1}
+    ],
+    "duplicate_ownership": {"present": true, "count": 1}
+  },
+  "current": {
+    "totals": {
+      "global_logical_bytes": 73,
+      "distribution_logical_bytes": 73
+    },
+    "completeness": "incomplete",
+    "warning_code_counts": [
+      {"code": "duplicate-ownership", "count": 1},
+      {"code": "missing-file", "count": 1},
+      {"code": "missing-record", "count": 1}
+    ],
+    "duplicate_ownership": {"present": true, "count": 1}
+  },
+  "changes": {
+    "totals": {
+      "global_logical_bytes_delta": 32,
+      "distribution_logical_bytes_delta": 25
+    },
+    "distributions": [
+      {
+        "name": "alpha-pkg",
+        "kind": "unchanged",
+        "baseline": {"version": "1.0", "logical_bytes": 25},
+        "current": {"version": "1.0", "logical_bytes": 30},
+        "logical_bytes_delta": 5
+      },
+      {
+        "name": "new-pkg",
+        "kind": "added",
+        "baseline": null,
+        "current": {"version": "1", "logical_bytes": 11},
+        "logical_bytes_delta": 11
+      },
+      {
+        "name": "zeta",
+        "kind": "version-changed",
+        "baseline": {"version": "2.0", "logical_bytes": 23},
+        "current": {"version": "3.0", "logical_bytes": 32},
+        "logical_bytes_delta": 9
+      }
+    ],
+    "nonreconciliation": {
+      "present": true,
+      "distribution_minus_global_logical_bytes_delta": -7,
+      "reason": "duplicate-owned-files-may-be-counted-per-distribution"
+    }
+  },
+  "completeness": "incomplete"
+}

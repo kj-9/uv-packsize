@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-03a: pure comparison JSON schema/rendererを実装する |
+| 次のタスク | P4-03b: `--comparison-json` CLI/public contractを接続する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-03a: comparison-result-v1 JSON schema/renderer |
+| 次の成果物 | P4-03b: `--comparison-json` CLI/public contract |
 
 ## ステータス定義
 
@@ -235,7 +235,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-02b1 | Phase 4 | current `AnalysisResult`からsafe baseline comparison projectionを実装する | `done` |
 | P4-02b2 | Phase 4 | compare CLI/read boundaryを実装する | `done` |
 | P4-03 | Phase 4 | diff JSON/baseline write contractを分離して設計する | `done` |
-| P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `todo` |
+| P4-03a | Phase 4 | pure `comparison-result-v1` JSON schema/rendererを実装する | `done` |
 | P4-03b | Phase 4 | `--comparison-json` CLI/public contractを接続する | `todo` |
 | P4-03c | Phase 4 | fresh baselineのpure render/atomic writerを実装する | `todo` |
 | P4-03d | Phase 4 | `--write-baseline` CLI/README/local E2Eを接続する | `todo` |
@@ -885,6 +885,32 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P4-03aとする。pure serializerだけを先に固定し、CLI、filesystem書込み、公開READMEを触らないlow-riskな完了単位とする。
 
 ## 作業記録
+
+### 2026-07-31: P4-03a pure comparison JSON schema/renderer
+
+状態: `done`
+
+実装:
+
+- `comparison-result-v1` のdraft 2020-12 closed schemaと、exactな`AnalysisDiff`だけを受けるpure rendererを追加した。公開documentは固定順の`schema_version`、measurement、opaque context、両side summary、changes、aggregate completenessで構成し、full outer joinのunchanged rowも含める。
+- contextは全`BaselineResolutionContext` safe projectionをcanonical compact JSONへ縮約し、`uv-packsize/comparison-context/v1\0` domain prefix付きSHA-256だけを公開する。requirements、個別fingerprint、raw context値は出力しない。
+- nonreconciliationはdistribution aggregateとglobal deltaの差から導出し、0では`false`/`null`、非0では固定reasonを出力する。schemaはbaseline/current row sideとkindの整合、boolean/count、signed delta、`2 * MAX_BASELINE_INTEGER`までのnonreconciliation差を表現する。distribution aggregateは多数distributionの合計になり得るため上限でclampしない。
+- wheel/sdist artifact検証に新renderer moduleを追加した。analysis JSON v1/v2、CLI、READMEは変更していない。
+
+テスト:
+
+- committed golden、固定key order、empty/zero/incomplete/nonreconciliation、MAX境界、context fingerprintの決定性と全field差、privacy、wrong type、closed schema/rangeをnetwork/I/O不要で検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_comparison_json_render.py -q` — 10 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — Ruff format/lint、ty、README生成整合性が成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 660 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P4-03bで`--comparison-json`のCLI/public contractを接続する。
 
 ### 2026-07-31: P3-04b existing-prefix read-only discovery adapter
 
