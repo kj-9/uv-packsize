@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Phase 3: サイズの理由を説明する（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P3-04c: prefix CLI/README契約とend-to-end検証を接続する |
+| 次のタスク | P3-05: 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
@@ -224,7 +224,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P3-04a1 | Phase 3 | existing-prefix context modelと既存schema v1互換境界を実装する | `done` |
 | P3-04a2 | Phase 3 | existing-prefix用JSON schema v2を設計・実装する | `done` |
 | P3-04b | Phase 3 | existing prefixのlayout/context discovery adapterを実装する | `done` |
-| P3-04c | Phase 3 | prefix CLI/README契約とend-to-end検証を接続する | `todo` |
+| P3-04c1 | Phase 3 | prefix CLI core/unit契約を接続する | `done` |
+| P3-04c2 | Phase 3 | prefix README契約とlocal end-to-end検証を接続する | `done` |
 | P3-05 | Phase 3 | 複数rootの個別寄与とshared dependencyの非二重計上を表示・検証する | `todo` |
 | P4-01 | Phase 4 | baseline JSONと差分ポリシーを設計する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
@@ -592,6 +593,43 @@ P2-06bの完了条件:
 - observed contextはabsolute raw path、credential、requirements、index URLなどを結果modelまたはJSONへ保持しない。
 - `path_flavor`と`case_rule`はinventory layoutと常に一致し、不一致は収集前にtyped errorになる。
 - JSON schema v1と既存のresolution-based text/JSON出力はbyte-compatibleに維持する。existing prefix結果はv2以降の明示的schemaでだけ機械可読に表現する。
+
+### 2026-07-31: P3-04c1 existing-prefix CLI core/unit
+
+完了したタスク。
+
+変更:
+
+- `--prefix PATH`、repeatableな`--site-packages REL`、`--case-rule sensitive|insensitive`を追加し、既存install modeと明確に排他的にした。`PATH`はClickの存在検証を使わず、adapterがread-onlyに検証する。
+- prefix modeはuvの存在確認、venv作成、install、interpreter実行、subprocessを一切行わず、host nativeの`PathFlavor`とcaller指定の`CaseRule`で`discover_existing_prefix()`からinventory分析へ接続する。
+- prefix JSONはschema v2を使い、`--json`併用時の`--bin`、`--explain`、`--breakdown`を完全に無視する。textの`--explain`/`--breakdown`はrequirements由来の主張をできないためusage errorで拒否する。
+- `--bin`のprefix表示は固定の`Binaries in prefix`見出しを使用し、既存install textの`Binaries in .venv/bin`およびbytesを変えない。render titleは固定許可値だけを受け入れる。
+- discovery、analysis、inventoryの公開エラーはraw prefix/path/metadata/causeを含まない固定診断へ正規化した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_render.py tests/test_uv_packsize.py -q` — 成功（78 passed）。
+- full CI/lock/build検証はP3-04c2のlocal integration/READMEと合わせて実施する。
+
+次のタスクはP3-04c2とする。READMEのpublic contractとlocal prefix end-to-end/error検証を追加し、P3-04cを完了する。
+
+### 2026-07-31: P3-04c2 existing-prefix README/local integration
+
+完了したタスク。
+
+変更:
+
+- READMEに`--prefix`、repeatableな`--site-packages`、明示的`--case-rule`の入力契約を追加した。relative prefixのcanonical physical directory化、native host path formのみの受理、trustedなcase declaration、read-only操作範囲、TOCTOUのbest-effort制約を明記した。
+- fresh installのJSON schema v1とexisting-prefix JSON schema v2の境界、v2 contextのunknown `null`/empty値とraw local path非出力、prefix textでgraph由来の`--explain`/`--breakdown`を利用できない理由、JSON時のpresentation flag無視、prefix用`--bin`見出し、POSIX shebangによるscript logical sizeのpath依存を公開契約として記録した。
+- local wheel end-to-endを追加し、fresh resultからtarget `case_rule`を取得してprefix CLIへ渡す。両modeでdistribution名/version、warnings、completeness、duplicate ownership、non-script file objectを厳密比較し、scriptは`logical_bytes`以外のprojectionを比較する。global non-script unique bytesは一致し、global totalの差がunique script bytesだけで説明できることを確認する。
+- v2 contextのcase rule、unknown `null`/empty fields、raw local path非出力、prefix textの`--bin` total不変、`--json`とtext presentation flagの7組合せのbyte一致、scan前後のfull prefix hash snapshot不変をlocal wheelで検証した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make readme`、`make ci-check`、`make test` — 成功（509 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check`、`make verify-build` — 成功。wheel/sdistとinstalled entry pointを検証した。
+
+P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とshared dependencyの非二重計上を表示・検証する。
 
 ## 作業記録
 

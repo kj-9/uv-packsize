@@ -36,23 +36,32 @@ cog.out(
 )
 ]]] -->
 ```bash
-Usage: uv-packsize [OPTIONS] PACKAGE_NAMES...
+Usage: uv-packsize [OPTIONS] [PACKAGE_NAMES]...
 
   Report the size of a Python package and its dependencies using uv.
 
 Options:
-  --version          Show the version and exit.
-  --bin              Text output only: display RECORD-owned scripts separately
-                     without changing the total.
-  --allow-build      Allow source builds during installation; disabled by
-                     default.
-  --json             Write the versioned analysis result as JSON to stdout.
-  --explain          Text output only: show installed-metadata dependency paths
-                     and attribution.
-  --breakdown        Text output only: show global file-category and dependency-
-                     role sizes.
-  -p, --python TEXT  Specify the Python version for the virtual environment.
-  --help             Show this message and exit.
+  --version                       Show the version and exit.
+  --prefix PATH                   Analyze an existing prefix without running or
+                                  changing it.
+  --site-packages REL             Relative site-packages directory inside
+                                  --prefix (repeatable).
+  --case-rule [sensitive|insensitive]
+                                  Target filesystem case rule required with
+                                  --prefix.
+  --bin                           Text output only: display RECORD-owned scripts
+                                  separately without changing the total.
+  --allow-build                   Allow source builds during installation;
+                                  disabled by default.
+  --json                          Write the versioned analysis result as JSON to
+                                  stdout.
+  --explain                       Text output only: show installed-metadata
+                                  dependency paths and attribution.
+  --breakdown                     Text output only: show global file-category
+                                  and dependency-role sizes.
+  -p, --python TEXT               Specify the Python version for the virtual
+                                  environment.
+  --help                          Show this message and exit.
 
 ```
 <!-- [[[end]]] -->
@@ -61,6 +70,45 @@ You can also use:
 ```bash
 python -m uv_packsize --help
 ```
+
+### Existing prefix analysis
+
+Use `--prefix` to inspect an already-installed environment without running or
+changing it. Specify every site-packages directory relative to that prefix and
+declare its filesystem case rule explicitly:
+
+```bash
+uv-packsize --prefix .venv \
+  --site-packages lib/python3.12/site-packages \
+  --case-rule sensitive --json > prefix-analysis.json
+```
+
+`--site-packages` is repeatable. Its value must be a non-empty, canonical
+relative path in the native path form of the host running the command; absolute
+paths, `.`/`..`, and symlink components are rejected. A relative `--prefix` is
+resolved from the current working directory and fixed to its canonical physical
+directory before scanning. This mode only supports the host's native path
+flavor. `--case-rule sensitive` or `--case-rule insensitive` is a trusted
+caller declaration, not a filesystem probe, so it must match the target
+filesystem's semantics.
+
+The prefix is never used to create an environment, install or uninstall a
+package, run Python, invoke `uv`, or write metadata. Directory validation and
+the subsequent inventory scan are necessarily best-effort: a concurrent change
+to the prefix can still race them (TOCTOU), so scan an otherwise stable prefix.
+
+Fresh package requests produce JSON schema v1. Existing-prefix scans produce
+schema v2, whose context deliberately leaves unknown resolution fields as
+`null` or empty values and never contains the raw prefix or site-packages
+paths. Inspect `schema_version` before comparing results from the two input
+modes. In prefix text output, `--bin` uses the heading `Binaries in prefix`;
+generated script sizes can differ from a fresh temporary installation because
+POSIX script shebangs can contain the installation path.
+
+`--explain` and `--breakdown` are unavailable with prefix text output because
+the original requested roots and resolver conditions are not known. With
+`--json`, those presentation flags (and `--bin`) are accepted but ignored, so
+all such option combinations produce the same schema v2 bytes.
 
 If virtual environment creation or package installation fails, the command exits
 with status 1 and shows a concise failure summary with the `uv` exit code,
@@ -202,7 +250,8 @@ The total does not include:
 
 `--bin` is a presentation option. It moves RECORD-owned script files from the
 package table into a separate `Binaries in .venv/bin` table; it never changes
-the final global total or scans unowned virtual-environment boilerplate.
+the final global total or scans unowned virtual-environment boilerplate. For an
+existing-prefix scan, the equivalent heading is `Binaries in prefix`.
 Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 
 ### Current limitations

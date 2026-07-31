@@ -193,6 +193,34 @@ def test_renderer_splits_scripts_into_deduplicated_prefix_relative_binary_rows()
     assert "Total size:  25 B" in report
 
 
+def test_renderer_can_use_the_fixed_existing_prefix_binary_title():
+    result = AnalysisResult(
+        context=context(),
+        distributions=(
+            distribution(
+                "example",
+                file_entry("bin/example", 4, category=FileCategory.SCRIPT),
+            ),
+        ),
+    )
+
+    report = render_analysis_report(
+        result, show_scripts=True, binaries_title="Binaries in prefix"
+    )
+
+    assert "--- Binaries in prefix ---" in report
+    assert "Binaries in .venv/bin" not in report
+
+
+@pytest.mark.parametrize("title", ["", "local/path", "Binaries in private prefix"])
+def test_renderer_rejects_arbitrary_binary_titles(title):
+    with pytest.raises(ValueError, match="supported stable title"):
+        render_analysis_report(
+            AnalysisResult(context=context(), distributions=()),
+            binaries_title=title,
+        )
+
+
 def test_renderer_uses_a_deterministic_display_path_for_shared_windows_script():
     def analysis(first_path: str, second_path: str) -> AnalysisResult:
         return AnalysisResult(

@@ -17,6 +17,10 @@ from uv_packsize.environment import (
     EnvironmentDiscoveryError,
     discover_installed_environment,
 )
+from uv_packsize.existing_prefix import (
+    ExistingPrefixDiscoveryError,
+    discover_existing_prefix,
+)
 from uv_packsize.explanation import render_explained_analysis_report
 from uv_packsize.footprint import summarize_footprint
 from uv_packsize.footprint_render import (
@@ -29,7 +33,7 @@ from uv_packsize.installed_metadata import (
 )
 from uv_packsize.inventory import InventoryError
 from uv_packsize.json_render import render_analysis_json
-from uv_packsize.models import BuildPolicy
+from uv_packsize.models import BuildPolicy, CaseRule, PathFlavor
 from uv_packsize.render import render_analysis_report
 
 _UV_VERSION = re.compile(
@@ -170,6 +174,29 @@ def _analysis_failure_message(error: Exception) -> str:
     raise TypeError("error must be an expected analysis failure")
 
 
+def _prefix_analysis_failure_message(error: Exception) -> str:
+    """Produce a fixed diagnostic for an existing-prefix inventory failure."""
+
+    if isinstance(error, AnalysisContextError):
+        return f"Could not analyze the existing prefix ({error.code.value})."
+    if isinstance(error, InventoryError):
+        code = getattr(error, "code", None)
+        if code is not None:
+            return f"Could not analyze existing prefix files ({code.value})."
+        return "Could not analyze existing prefix files."
+    raise TypeError("error must be an expected prefix analysis failure")
+
+
+def _prefix_discovery_failure_message(error: ExistingPrefixDiscoveryError) -> str:
+    """Return the stable public error without retaining a local path."""
+
+    return f"Could not inspect the existing prefix ({error.code.value})."
+
+
+def _host_path_flavor() -> PathFlavor:
+    return PathFlavor.WINDOWS if os.name == "nt" else PathFlavor.POSIX
+
+
 def _explanation_failure_message(error: Exception) -> str:
     """Return a fixed public diagnostic for safe explanation failures.
 
@@ -185,7 +212,24 @@ def _explanation_failure_message(error: Exception) -> str:
 
 @click.command()
 @click.version_option()
-@click.argument("package_names", nargs=-1, required=True)
+@click.argument("package_names", nargs=-1, required=False)
+@click.option(
+    "--prefix",
+    type=click.Path(path_type=Path),
+    help="Analyze an existing prefix without running or changing it.",
+)
+@click.option(
+    "--site-packages",
+    "site_packages_relative",
+    multiple=True,
+    metavar="REL",
+    help="Relative site-packages directory inside --prefix (repeatable).",
+)
+@click.option(
+    "--case-rule",
+    type=click.Choice([rule.value for rule in CaseRule]),
+    help="Target filesystem case rule required with --prefix.",
+)
 @click.option(
     "--bin",
     is_flag=True,
@@ -218,10 +262,43 @@ def _explanation_failure_message(error: Exception) -> str:
     "python_version",
     help="Specify the Python version for the virtual environment.",
 )
-def cli(  # noqa: PLR0913
-    package_names, bin, json_output, explain, breakdown, allow_build, python_version
+def cli(  # noqa: PLR0912, PLR0913, PLR0915
+    package_names,
+    prefix,
+    site_packages_relative,
+    case_rule,
+    bin,
+    json_output,
+    explain,
+    breakdown,
+    allow_build,
+    python_version,
 ):
     """Report the size of a Python package and its dependencies using uv."""
+    if prefix is not None:
+        _validate_prefix_options(
+            package_names=package_names,
+            site_packages_relative=site_packages_relative,
+            case_rule=case_rule,
+            allow_build=allow_build,
+            python_version=python_version,
+            explain=explain,
+            breakdown=breakdown,
+            json_output=json_output,
+        )
+        _run_prefix_analysis(
+            prefix=prefix,
+            site_packages_relative=site_packages_relative,
+            case_rule=CaseRule(case_rule),
+            bin=bin,
+            json_output=json_output,
+        )
+        return
+
+    if site_packages_relative or case_rule is not None:
+        raise click.UsageError("--site-packages and --case-rule require --prefix.")
+    if not package_names:
+        raise click.UsageError("Missing argument 'PACKAGE_NAMES...'.")
     if not shutil.which("uv"):
         raise click.ClickException(
             "'uv' command not found. Please install it first. "
@@ -318,3 +395,76 @@ def cli(  # noqa: PLR0913
             click.echo(render_analysis_report(result, show_scripts=bin))
 
     click.echo("\nCalculation complete.", err=json_output)
+
+
+def _validate_prefix_options(  # noqa: PLR0913
+    *,
+    package_names: tuple[str, ...],
+    site_packages_relative: tuple[str, ...],
+    case_rule: str | None,
+    allow_build: bool,
+    python_version: str | None,
+    explain: bool,
+    breakdown: bool,
+    json_output: bool,
+) -> None:
+    """Reject mutually exclusive CLI modes before any external interaction."""
+
+    if package_names:
+        raise click.UsageError("PACKAGE_NAMES cannot be used with --prefix.")
+    if allow_build:
+        raise click.UsageError("--allow-build cannot be used with --prefix.")
+    if python_version is not None:
+        raise click.UsageError("--python cannot be used with --prefix.")
+    if not site_packages_relative:
+        raise click.UsageError("--site-packages is required with --prefix.")
+    if case_rule is None:
+        raise click.UsageError("--case-rule is required with --prefix.")
+    # Text-only graph assertions require a resolving input, which a prefix
+    # deliberately does not preserve.  JSON intentionally ignores all text
+    # presentation flags, matching the established JSON option boundary.
+    if not json_output and (explain or breakdown):
+        unavailable = "--explain" if explain else "--breakdown"
+        raise click.UsageError(f"{unavailable} is unavailable with --prefix.")
+
+
+def _run_prefix_analysis(
+    *,
+    prefix: Path,
+    site_packages_relative: tuple[str, ...],
+    case_rule: CaseRule,
+    bin: bool,
+    json_output: bool,
+) -> None:
+    """Analyze an existing prefix without invoking uv or an interpreter."""
+
+    click.echo("Analyzing existing prefix...", err=json_output)
+    try:
+        environment = discover_existing_prefix(
+            prefix=prefix,
+            site_packages_relative=site_packages_relative,
+            path_flavor=_host_path_flavor(),
+            case_rule=case_rule,
+        )
+    except ExistingPrefixDiscoveryError as error:
+        raise click.ClickException(_prefix_discovery_failure_message(error)) from None
+
+    try:
+        result = analyze_installed_environment(
+            context=environment.context,
+            layouts=environment.layouts,
+        )
+    except (AnalysisContextError, InventoryError) as error:
+        raise click.ClickException(_prefix_analysis_failure_message(error)) from None
+
+    if json_output:
+        click.echo(render_analysis_json(result, schema_version=2), nl=False)
+    else:
+        click.echo(
+            render_analysis_report(
+                result,
+                show_scripts=bin,
+                binaries_title="Binaries in prefix",
+            )
+        )
+    click.echo("\nExisting prefix analysis complete.", err=json_output)

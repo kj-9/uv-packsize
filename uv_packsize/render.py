@@ -9,6 +9,10 @@ from collections import Counter
 
 from uv_packsize.models import AnalysisResult, Completeness, FileCategory, FileEntry
 
+_VENV_BINARIES_TITLE = "Binaries in .venv/bin"
+_PREFIX_BINARIES_TITLE = "Binaries in prefix"
+_ALLOWED_BINARIES_TITLES = frozenset({_VENV_BINARIES_TITLE, _PREFIX_BINARIES_TITLE})
+
 
 def format_size(logical_bytes: int) -> str:
     """Format non-negative logical bytes using binary size units."""
@@ -32,6 +36,7 @@ def render_analysis_report(
     result: AnalysisResult,
     *,
     show_scripts: bool = False,
+    binaries_title: str = _VENV_BINARIES_TITLE,
 ) -> str:
     """Return the complete stable text report for an analysis result.
 
@@ -43,6 +48,10 @@ def render_analysis_report(
         raise TypeError("result must be an AnalysisResult")
     if not isinstance(show_scripts, bool):
         raise TypeError("show_scripts must be a bool")
+    if not isinstance(binaries_title, str):
+        raise TypeError("binaries_title must be a str")
+    if binaries_title not in _ALLOWED_BINARIES_TITLES:
+        raise ValueError("binaries_title must be a supported stable title")
 
     package_rows = _distribution_rows(result, exclude_scripts=show_scripts)
     package_row_total = sum(size for _name, size in package_rows)
@@ -68,7 +77,7 @@ def render_analysis_report(
         displayed_row_total += script_total
         sections.append(
             _render_table(
-                title="Binaries in .venv/bin",
+                title=binaries_title,
                 header_title="Binary",
                 rows=script_rows,
                 footer_title="Total Binaries Size",

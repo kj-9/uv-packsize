@@ -26,13 +26,17 @@ from uv_packsize.environment import (
     EnvironmentDiscoveryError,
     EnvironmentDiscoveryErrorCode,
 )
+from uv_packsize.existing_prefix import (
+    ExistingPrefixDiscoveryError,
+    ExistingPrefixDiscoveryErrorCode,
+)
 from uv_packsize.installed_metadata import (
     InstalledMetadataAdapterError,
     InstalledMetadataAdapterErrorCode,
 )
 from uv_packsize.inventory import InventoryScanError, InventoryScanErrorCode
 from uv_packsize.json_render import render_analysis_json
-from uv_packsize.models import BuildPolicy
+from uv_packsize.models import BuildPolicy, CaseRule
 
 EXPECTED_VERSION = "0.1.2"
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -798,18 +802,22 @@ def test_cli_help_describes_json_and_bin_interaction():
 
     assert result.exit_code == 0
     assert "--json" in result.output
-    assert "Write the versioned analysis result as JSON to stdout." in result.output
+    assert "Write the versioned analysis result as JSON" in result.output
+    assert "stdout." in result.output
     assert "--bin" in result.output
     assert "Text output only:" in result.output
     assert "--explain" in result.output
-    assert "installed-metadata dependency paths" in result.output
+    assert "installed-metadata" in result.output
     assert "attribution." in result.output
     assert "--breakdown" in result.output
-    assert "global file-category and dependency-" in result.output
-    assert "role sizes." in result.output
+    assert "global file-category" in result.output
+    assert "dependency-role sizes." in result.output
     assert "--allow-build" in result.output
-    assert "Allow source builds during installation; disabled by" in result.output
+    assert "Allow source builds during installation;" in result.output
     assert "default." in result.output
+    assert "--prefix" in result.output
+    assert "--site-packages REL" in result.output
+    assert "--case-rule" in result.output
 
 
 def test_cli_json_invalid_usage_keeps_click_exit_code_two():
@@ -1297,3 +1305,195 @@ def test_package_name_is_required():
 
     assert result.exit_code != 0
     assert "Missing argument 'PACKAGE_NAMES...'" in result.output
+
+
+def _prefix_arguments(venv_path, site_packages, *additional):
+    return [
+        "--prefix",
+        str(venv_path),
+        "--site-packages",
+        site_packages.relative_to(venv_path).as_posix(),
+        "--case-rule",
+        CaseRule.INSENSITIVE.value if os.name == "nt" else CaseRule.SENSITIVE.value,
+        *additional,
+    ]
+
+
+def test_cli_prefix_analyzes_without_uv_or_install_helpers(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("install-mode helper must not be called")
+
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", unavailable)
+    monkeypatch.setattr("uv_packsize.cli._create_venv", unavailable)
+    monkeypatch.setattr("uv_packsize.cli._install_package", unavailable)
+    monkeypatch.setattr("uv_packsize.cli._uv_version", unavailable)
+    monkeypatch.setattr("uv_packsize.cli.subprocess.run", unavailable)
+
+    result = CliRunner().invoke(cli, _prefix_arguments(venv_path, site_packages))
+
+    assert result.exit_code == 0
+    assert "Analyzing existing prefix..." in result.stdout
+    assert "sample" in result.stdout
+    assert "Existing prefix analysis complete." in result.stdout
+    assert "Calculating size" not in result.output
+
+
+def test_cli_prefix_json_uses_v2_and_hides_prefix(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("uv must not be checked")),
+    )
+
+    result = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--json")
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 2
+    assert payload["context"]["input_kind"] == "existing-prefix"
+    assert str(venv_path) not in result.stdout + result.stderr
+    assert (
+        result.stderr
+        == "Analyzing existing prefix...\n\nExisting prefix analysis complete.\n"
+    )
+
+
+def test_cli_prefix_json_ignores_text_presentation_options(installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    plain = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--json")
+    )
+    decorated = CliRunner().invoke(
+        cli,
+        _prefix_arguments(
+            venv_path, site_packages, "--json", "--bin", "--explain", "--breakdown"
+        ),
+    )
+
+    assert plain.exit_code == decorated.exit_code == 0
+    assert plain.stdout == decorated.stdout
+    assert plain.stderr == decorated.stderr
+
+
+def test_cli_prefix_bin_uses_generic_binary_title(installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--bin")
+    )
+
+    assert result.exit_code == 0
+    assert "--- Binaries in prefix ---" in result.stdout
+    assert "Binaries in .venv/bin" not in result.stdout
+    assert _reported_total(result.stdout) in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["sample", "--prefix", "/private/secret"], "PACKAGE_NAMES cannot"),
+        (["--prefix", "/private/secret", "--allow-build"], "--allow-build cannot"),
+        (["--prefix", "/private/secret", "--python", "3.12"], "--python cannot"),
+        (["--prefix", "/private/secret"], "--site-packages is required"),
+        (
+            ["--prefix", "/private/secret", "--site-packages", "lib/site-packages"],
+            "--case-rule is required",
+        ),
+    ],
+)
+def test_cli_prefix_guards_are_usage_errors_and_do_not_echo_path(arguments, message):
+    result = CliRunner().invoke(cli, arguments)
+
+    assert result.exit_code == 2
+    assert message in result.output
+    assert "/private/secret" not in result.output
+
+
+@pytest.mark.parametrize("option", ["--explain", "--breakdown"])
+def test_cli_prefix_rejects_text_graph_options(installed_venv, option):
+    venv_path, _python, site_packages = installed_venv
+    result = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, option)
+    )
+
+    assert result.exit_code == 2
+    assert f"{option} is unavailable with --prefix." in result.output
+
+
+def test_cli_prefix_sanitizes_discovery_failure(monkeypatch, tmp_path):
+    secret_prefix = tmp_path / "secret-prefix"
+    secret_prefix.mkdir()
+    site = secret_prefix / "site"
+    site.mkdir()
+    monkeypatch.setattr(
+        "uv_packsize.cli.discover_existing_prefix",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            ExistingPrefixDiscoveryError(
+                ExistingPrefixDiscoveryErrorCode.INVALID_PREFIX,
+                str(secret_prefix),
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--prefix",
+            str(secret_prefix),
+            "--site-packages",
+            "site",
+            "--case-rule",
+            "sensitive",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Could not inspect the existing prefix (invalid-prefix)." in result.stderr
+    assert str(secret_prefix) not in result.output
+    assert "Traceback" not in result.output
+
+
+def test_cli_prefix_sanitizes_inventory_failure(monkeypatch, tmp_path):
+    secret_prefix = tmp_path / "secret-prefix"
+    secret_prefix.mkdir()
+    site = secret_prefix / "site"
+    site.mkdir()
+    monkeypatch.setattr(
+        "uv_packsize.cli.discover_existing_prefix",
+        lambda **_kwargs: SimpleNamespace(context=object(), layouts=()),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.analyze_installed_environment",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            InventoryScanError(InventoryScanErrorCode.FILESYSTEM_ERROR, str(site))
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--prefix",
+            str(secret_prefix),
+            "--site-packages",
+            "site",
+            "--case-rule",
+            "sensitive",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert (
+        "Could not analyze existing prefix files (filesystem-error)." in result.stderr
+    )
+    assert str(secret_prefix) not in result.output
+    assert str(site) not in result.output
+    assert "Traceback" not in result.output

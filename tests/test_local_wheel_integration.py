@@ -9,10 +9,13 @@ import io
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import sysconfig
 import zipfile
 from pathlib import Path
+from typing import cast
 
 from local_wheel_factory import build_wheelhouse
 
@@ -279,6 +282,155 @@ def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
         assert default.stderr == with_text_option.stderr
 
 
+def test_existing_prefix_local_wheels_match_fresh_inventory_and_hide_local_paths(
+    tmp_path,
+):
+    """A real read-only prefix scan has v2-only, non-reversible context."""
+
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    fresh = _run_cli(tmp_path, wheelhouse, "--json")
+    fresh_payload = json.loads(fresh.stdout)
+    prefix, site_packages_relative = _install_persistent_prefix(tmp_path, wheelhouse)
+
+    completed = _run_prefix_cli(
+        tmp_path,
+        prefix,
+        site_packages_relative,
+        fresh_payload["context"]["case_rule"],
+        "--json",
+    )
+
+    assert fresh.returncode == completed.returncode == 0
+    prefix_payload = json.loads(completed.stdout)
+    assert fresh_payload["schema_version"] == 1
+    assert prefix_payload["schema_version"] == 2
+    for field in ("warnings", "duplicate_ownerships", "completeness"):
+        assert prefix_payload[field] == fresh_payload[field]
+
+    fresh_distributions = _distributions_by_name(fresh_payload)
+    prefix_distributions = _distributions_by_name(prefix_payload)
+    assert set(prefix_distributions) == set(fresh_distributions)
+    for name, fresh_distribution in fresh_distributions.items():
+        prefix_distribution = prefix_distributions[name]
+        assert prefix_distribution["version"] == fresh_distribution["version"]
+        assert prefix_distribution["warnings"] == fresh_distribution["warnings"]
+        assert prefix_distribution["completeness"] == fresh_distribution["completeness"]
+        assert _non_script_files(prefix_distribution) == _non_script_files(
+            fresh_distribution
+        )
+        assert _script_file_projections(
+            prefix_distribution
+        ) == _script_file_projections(fresh_distribution)
+
+    # uv-generated POSIX console scripts embed the install interpreter in their
+    # shebang. Prefix scans must therefore preserve all non-script inventory
+    # bytes while allowing logical script sizes (and only those sizes) to vary.
+    fresh_non_script_bytes = _global_unique_bytes(fresh_payload, include_scripts=False)
+    prefix_non_script_bytes = _global_unique_bytes(
+        prefix_payload, include_scripts=False
+    )
+    fresh_script_bytes = _global_unique_bytes(fresh_payload, include_scripts=True) - (
+        fresh_non_script_bytes
+    )
+    prefix_script_bytes = _global_unique_bytes(prefix_payload, include_scripts=True) - (
+        prefix_non_script_bytes
+    )
+    assert prefix_non_script_bytes == fresh_non_script_bytes
+    assert (
+        prefix_payload["totals"]["global_logical_bytes"]
+        - fresh_payload["totals"]["global_logical_bytes"]
+        == prefix_script_bytes - fresh_script_bytes
+    )
+    assert prefix_payload["context"] == {
+        "input_kind": "existing-prefix",
+        "requirements": [],
+        "python_version": None,
+        "platform": None,
+        "architecture": None,
+        "path_flavor": "windows" if os.name == "nt" else "posix",
+        "case_rule": fresh_payload["context"]["case_rule"],
+        "uv_version": None,
+        "build_policy": None,
+        "compile_bytecode": None,
+        "extras": [],
+        "index_identifiers": [],
+        "resolution_strategy": None,
+    }
+    for local_path in (
+        prefix,
+        prefix / site_packages_relative,
+        wheelhouse,
+        tmp_path / "home",
+    ):
+        assert str(local_path) not in completed.stdout
+    assert completed.stderr == (
+        "Analyzing existing prefix...\n\nExisting prefix analysis complete.\n"
+    )
+
+
+def test_existing_prefix_local_wheels_bin_and_json_options_preserve_contract(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    fresh = _run_cli(tmp_path, wheelhouse, "--json")
+    assert fresh.returncode == 0
+    case_rule = json.loads(fresh.stdout)["context"]["case_rule"]
+    prefix, site_packages_relative = _install_persistent_prefix(tmp_path, wheelhouse)
+
+    default = _run_prefix_cli(tmp_path, prefix, site_packages_relative, case_rule)
+    with_scripts = _run_prefix_cli(
+        tmp_path, prefix, site_packages_relative, case_rule, "--bin"
+    )
+    assert default.returncode == with_scripts.returncode == 0
+    assert "Binaries in prefix" not in default.stdout
+    assert "Binaries in .venv/bin" not in default.stdout
+    assert "--- Binaries in prefix ---" in with_scripts.stdout
+    assert "Binaries in .venv/bin" not in with_scripts.stdout
+    assert _reported_total(default.stdout) == _reported_total(with_scripts.stdout)
+    script_paths = _table_names(with_scripts.stdout, "Binaries in prefix")
+    assert any(_is_installed_script(path, _ROOT_A) for path in script_paths)
+    assert any(
+        _is_installed_script(path, f"{_ROOT_A}-data-script") for path in script_paths
+    )
+    assert default.stderr == with_scripts.stderr == ""
+
+    plain_json = _run_prefix_cli(
+        tmp_path, prefix, site_packages_relative, case_rule, "--json"
+    )
+    for options in (
+        ("--bin",),
+        ("--explain",),
+        ("--breakdown",),
+        ("--bin", "--explain"),
+        ("--bin", "--breakdown"),
+        ("--explain", "--breakdown"),
+        ("--bin", "--explain", "--breakdown"),
+    ):
+        decorated = _run_prefix_cli(
+            tmp_path, prefix, site_packages_relative, case_rule, "--json", *options
+        )
+        assert plain_json.returncode == decorated.returncode == 0
+        assert plain_json.stdout == decorated.stdout
+        assert plain_json.stderr == decorated.stderr
+
+
+def test_existing_prefix_scan_does_not_mutate_real_local_wheel_environment(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    fresh = _run_cli(tmp_path, wheelhouse, "--json")
+    assert fresh.returncode == 0
+    case_rule = json.loads(fresh.stdout)["context"]["case_rule"]
+    prefix, site_packages_relative = _install_persistent_prefix(tmp_path, wheelhouse)
+    before = _prefix_snapshot(prefix)
+
+    completed = _run_prefix_cli(
+        tmp_path, prefix, site_packages_relative, case_rule, "--json"
+    )
+
+    assert completed.returncode == 0
+    assert _prefix_snapshot(prefix) == before
+
+
 def _run_cli(
     tmp_path: Path, wheelhouse: Path, *options: str
 ) -> subprocess.CompletedProcess[str]:
@@ -301,6 +453,154 @@ def _run_cli(
         errors="replace",
         text=True,
     )
+
+
+def _run_prefix_cli(
+    tmp_path: Path,
+    prefix: Path,
+    site_packages_relative: str,
+    case_rule: str,
+    *options: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run the public prefix branch without using ``uv`` as the CLI runner."""
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "uv_packsize",
+            "--prefix",
+            str(prefix),
+            "--site-packages",
+            site_packages_relative,
+            "--case-rule",
+            case_rule,
+            *options,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=PROJECT_ROOT,
+        env=_integration_environment(tmp_path, tmp_path / "unused-wheelhouse"),
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
+
+
+def _install_persistent_prefix(tmp_path: Path, wheelhouse: Path) -> tuple[Path, str]:
+    """Install the fixture wheels once; this is test setup, not CLI execution."""
+
+    # Keep this deliberately unlike the temporary-install location. On POSIX,
+    # generated console-script shebangs then exercise the documented
+    # path-dependent script-byte difference between fresh and prefix scans.
+    prefix = tmp_path / "persistent-existing-prefix" / "venv"
+    environment = _integration_environment(tmp_path, wheelhouse)
+    _run_setup_uv(
+        environment,
+        "venv",
+        "--python",
+        sys.executable,
+        str(prefix),
+    )
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    _run_setup_uv(
+        environment,
+        "pip",
+        "install",
+        "--python",
+        str(python),
+        "--no-build",
+        *_REQUIREMENTS,
+    )
+    purelib = Path(
+        sysconfig.get_path(
+            "purelib",
+            vars={"base": str(prefix), "platbase": str(prefix)},
+        )
+    )
+    return prefix, str(purelib.relative_to(prefix))
+
+
+def _run_setup_uv(environment: dict[str, str], *arguments: str) -> None:
+    completed = subprocess.run(
+        ["uv", *arguments],
+        check=False,
+        capture_output=True,
+        cwd=PROJECT_ROOT,
+        env=environment,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def _prefix_snapshot(prefix: Path) -> dict[str, tuple[int, int, str | None]]:
+    """Capture every entry's lstat state and raw symlink target, if any."""
+
+    snapshot = {}
+    for path in (prefix, *sorted(prefix.rglob("*"))):
+        status = path.lstat()
+        relative = "." if path == prefix else path.relative_to(prefix).as_posix()
+        target: str | None = None
+        digest: str | None = None
+        if stat.S_ISLNK(status.st_mode):
+            target = os.readlink(path)
+        elif stat.S_ISREG(status.st_mode):
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        snapshot[relative] = (status.st_mode, status.st_size, target or digest)
+    return snapshot
+
+
+def _distributions_by_name(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    distributions = _json_object_list(payload["distributions"])
+    result = {}
+    for distribution in distributions:
+        name = distribution["name"]
+        assert isinstance(name, str)
+        result[name] = distribution
+    assert len(result) == len(distributions)
+    return result
+
+
+def _non_script_files(distribution: dict[str, object]) -> list[dict[str, object]]:
+    files = _json_object_list(distribution["files"])
+    return [file for file in files if file["category"] != "script"]
+
+
+def _script_file_projections(
+    distribution: dict[str, object],
+) -> list[dict[str, object]]:
+    files = _json_object_list(distribution["files"])
+    return [
+        {key: value for key, value in file.items() if key != "logical_bytes"}
+        for file in files
+        if file["category"] == "script"
+    ]
+
+
+def _global_unique_bytes(payload: dict[str, object], *, include_scripts: bool) -> int:
+    """Return fixture-global logical bytes deduplicated by public file path."""
+
+    files_by_path: dict[str, int] = {}
+    for distribution in _distributions_by_name(payload).values():
+        files = _json_object_list(distribution["files"])
+        for file in files:
+            if not include_scripts and file["category"] == "script":
+                continue
+            path = file["path"]
+            logical_bytes = file["logical_bytes"]
+            assert isinstance(path, str)
+            assert isinstance(logical_bytes, int)
+            previous = files_by_path.setdefault(path, logical_bytes)
+            assert previous == logical_bytes
+    return sum(files_by_path.values())
+
+
+def _json_object_list(value: object) -> list[dict[str, object]]:
+    assert isinstance(value, list)
+    assert all(isinstance(item, dict) for item in value)
+    return [cast(dict[str, object], item) for item in value]
 
 
 def _integration_environment(tmp_path: Path, wheelhouse: Path) -> dict[str, str]:
