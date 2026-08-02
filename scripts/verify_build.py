@@ -28,6 +28,7 @@ CRITICAL_MODULES = {
     "uv_packsize/budget_render.py",
     "uv_packsize/baseline_write.py",
     "uv_packsize/comparison_json_render.py",
+    "uv_packsize/project_comparison_json_render.py",
     "uv_packsize/diff.py",
     "uv_packsize/diff_render.py",
     "uv_packsize/cli.py",
@@ -40,6 +41,7 @@ CRITICAL_MODULES = {
     "uv_packsize/installed_metadata.py",
     "uv_packsize/root_contributions.py",
     "uv_packsize/root_contribution_render.py",
+    "uv_packsize/project_lock_json_render.py",
 }
 EXPECTED_RUNTIME_DEPENDENCIES = {
     "click",

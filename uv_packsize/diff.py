@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import cast
 
 from .baseline import (
     Baseline,
@@ -12,6 +13,7 @@ from .baseline import (
     BaselineDuplicateOwnershipSummary,
     BaselineExistingPrefixContext,
     BaselineMeasurement,
+    BaselineProjectLockContext,
     BaselineRequirement,
     BaselineResolutionContext,
     BaselineWarningSummary,
@@ -64,6 +66,44 @@ class IncompatibleComparisonError(ValueError):
     def __init__(self, reason: ComparisonIncompatibilityReason) -> None:
         self.reason = reason
         super().__init__(f"Baselines cannot be compared ({reason.value}).")
+
+
+def _project_compatibility_context(
+    context: BaselineProjectLockContext,
+) -> tuple[object, ...]:
+    """Return project comparison inputs while deliberately excluding lock bytes."""
+
+    return (
+        context.root_package,
+        context.workspace_member,
+        context.dependency_group_selection,
+        context.dependency_groups,
+        context.extras,
+        context.python_version_fingerprint,
+        context.platform_fingerprint,
+        context.architecture_fingerprint,
+        context.path_flavor,
+        context.case_rule,
+        context.uv_version_fingerprint,
+        context.build_policy,
+        context.compile_bytecode,
+        context.resolution_strategy_fingerprint,
+    )
+
+
+def project_lock_changed(baseline: Baseline, current: Baseline) -> bool:
+    """Whether comparable project-lock baselines were made from different locks."""
+
+    _validate_baseline(baseline)
+    _validate_baseline(current)
+    if baseline.schema_version != 3 or current.schema_version != 3:
+        raise TypeError("lock change is defined only for schema v3 baselines")
+    left, right = baseline.project_lock_context, current.project_lock_context
+    if not isinstance(left, BaselineProjectLockContext) or not isinstance(
+        right, BaselineProjectLockContext
+    ):
+        raise TypeError("project baselines require project lock contexts")
+    return left.lock_identity != right.lock_identity
 
 
 def _nonnegative(value: object, field: str) -> int:
@@ -195,6 +235,49 @@ def _validate_existing_prefix_context(value: object) -> None:
         raise ValueError("existing_prefix_context path semantics are invalid")
 
 
+def _validate_project_lock_context(value: object) -> BaselineProjectLockContext:
+    if not isinstance(value, BaselineProjectLockContext):
+        raise TypeError("project_lock_context must be a BaselineProjectLockContext")
+    if normalize_distribution_name(value.root_package) != value.root_package:
+        raise ValueError("project_lock_context root_package is invalid")
+    if value.workspace_member is not None and (
+        normalize_distribution_name(value.workspace_member) != value.workspace_member
+        or value.workspace_member != value.root_package
+    ):
+        raise ValueError("project_lock_context workspace_member is invalid")
+    if value.dependency_group_selection not in {"none", "explicit", "all"}:
+        raise ValueError("project_lock_context dependency group selection is invalid")
+    for field in ("dependency_groups", "extras"):
+        items = getattr(value, field)
+        if not isinstance(items, tuple) or tuple(sorted(set(items))) != items:
+            raise ValueError(f"project_lock_context {field} are not canonical")
+        if any(normalize_distribution_name(item) != item for item in items):
+            raise ValueError(f"project_lock_context {field} are invalid")
+    if value.dependency_group_selection == "none" and value.dependency_groups:
+        raise ValueError("project_lock_context none selection has groups")
+    if value.dependency_group_selection == "explicit" and not value.dependency_groups:
+        raise ValueError("project_lock_context explicit selection lacks groups")
+    for field in (
+        "python_version_fingerprint",
+        "platform_fingerprint",
+        "architecture_fingerprint",
+        "uv_version_fingerprint",
+        "resolution_strategy_fingerprint",
+        "lock_identity",
+    ):
+        _fingerprint(getattr(value, field))
+    if value.path_flavor not in {"posix", "windows"} or value.case_rule not in {
+        "sensitive",
+        "insensitive",
+    }:
+        raise ValueError("project_lock_context path semantics are invalid")
+    if value.build_policy not in {"wheel-only", "allow-build"} or not isinstance(
+        value.compile_bytecode, bool
+    ):
+        raise ValueError("project_lock_context policy is invalid")
+    return value
+
+
 def _supported_measurement(value: BaselineMeasurement) -> bool:
     return (value.kind, value.unit, value.ownership, value.deduplication) == (
         "installed-logical-size",
@@ -271,6 +354,7 @@ def _validate_baseline(  # noqa: PLR0912, PLR0915
         if (
             value.input_kind != "fresh-install"
             or value.existing_prefix_context is not None
+            or value.project_lock_context is not None
         ):
             raise ValueError("schema v1 baseline context is invalid")
         _validate_context(value.resolution_context)
@@ -279,9 +363,18 @@ def _validate_baseline(  # noqa: PLR0912, PLR0915
             value.input_kind != "existing-prefix"
             or value.resolution_context is not None
             or value.existing_prefix_context is None
+            or value.project_lock_context is not None
         ):
             raise ValueError("schema v2 baseline context is invalid")
         _validate_existing_prefix_context(value.existing_prefix_context)
+    elif value.schema_version == 3:
+        if (
+            value.input_kind != "project-lock"
+            or value.resolution_context is not None
+            or value.existing_prefix_context is not None
+        ):
+            raise ValueError("schema v3 baseline context is invalid")
+        _validate_project_lock_context(value.project_lock_context)
     return value
 
 
@@ -417,18 +510,28 @@ class AnalysisDiff:
             _validate_baseline(self.baseline),
             _validate_baseline(self.current),
         )
-        if baseline.schema_version != 1 or current.schema_version != 1:
-            raise ValueError("diff supports only schema v1 fresh-install baselines")
+        if (
+            baseline.schema_version not in {1, 3}
+            or current.schema_version != baseline.schema_version
+        ):
+            raise ValueError("diff supports matching fresh or project-lock baselines")
         if not _supported_measurement(
             baseline.measurement
         ) or not _supported_measurement(current.measurement):
             raise ValueError(
                 "diff baselines must use the supported measurement contract"
             )
-        if (
-            baseline.measurement != current.measurement
-            or baseline.resolution_context != current.resolution_context
-        ):
+        contexts_match = (
+            baseline.resolution_context == current.resolution_context
+            if baseline.schema_version == 1
+            else _project_compatibility_context(
+                cast(BaselineProjectLockContext, baseline.project_lock_context)
+            )
+            == _project_compatibility_context(
+                cast(BaselineProjectLockContext, current.project_lock_context)
+            )
+        )
+        if baseline.measurement != current.measurement or not contexts_match:
             raise ValueError("diff baselines must have matching comparison context")
         deltas = _deltas(baseline, current)
         if not isinstance(self.distributions, tuple) or self.distributions != deltas:
@@ -480,7 +583,11 @@ def compare_baselines(baseline: Baseline, current: Baseline) -> AnalysisDiff:
         _validate_baseline(baseline, require_supported_measurement=False),
         _validate_baseline(current, require_supported_measurement=False),
     )
-    if baseline.schema_version not in {1, 2} or current.schema_version not in {1, 2}:
+    if baseline.schema_version not in {1, 2, 3} or current.schema_version not in {
+        1,
+        2,
+        3,
+    }:
         raise IncompatibleComparisonError(
             ComparisonIncompatibilityReason.UNSUPPORTED_SCHEMA
         )
@@ -494,7 +601,21 @@ def compare_baselines(baseline: Baseline, current: Baseline) -> AnalysisDiff:
         )
     if not _supported_measurement(baseline.measurement):
         raise ValueError("baseline measurement contract is unsupported")
-    if baseline.resolution_context != current.resolution_context:
+    if baseline.schema_version != current.schema_version:
+        raise IncompatibleComparisonError(
+            ComparisonIncompatibilityReason.CONTEXT_MISMATCH
+        )
+    contexts_match = (
+        baseline.resolution_context == current.resolution_context
+        if baseline.schema_version == 1
+        else _project_compatibility_context(
+            cast(BaselineProjectLockContext, baseline.project_lock_context)
+        )
+        == _project_compatibility_context(
+            cast(BaselineProjectLockContext, current.project_lock_context)
+        )
+    )
+    if not contexts_match:
         raise IncompatibleComparisonError(
             ComparisonIncompatibilityReason.CONTEXT_MISMATCH
         )

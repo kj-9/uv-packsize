@@ -13,6 +13,8 @@ from typing import TypeAlias
 _NORMALIZED_NAME_SEPARATOR = re.compile(r"[-_.]+")
 _VALID_DISTRIBUTION_NAME = re.compile(r"^[A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*$")
 _VALID_INDEX_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
+_PROJECT_OBSERVATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 
 
@@ -41,6 +43,14 @@ def _require_safe_observation(value: str, field_name: str) -> None:
         or _WINDOWS_DRIVE_PATH.match(value)
     ):
         raise ValueError(f"{field_name} must be a safe observed value")
+
+
+def _require_project_observation(value: str, field_name: str) -> None:
+    """Accept only non-secret symbolic target observations for project output."""
+
+    _require_non_empty(value, field_name)
+    if not _PROJECT_OBSERVATION.fullmatch(value):
+        raise ValueError(f"{field_name} must be a safe project observation")
 
 
 def _non_empty_tuple(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
@@ -156,6 +166,14 @@ class CaseRule(str, Enum):
 
     SENSITIVE = "sensitive"
     INSENSITIVE = "insensitive"
+
+
+class DependencyGroupSelection(str, Enum):
+    """How project dependency groups were selected for a lock analysis."""
+
+    NONE = "none"
+    EXPLICIT = "explicit"
+    ALL = "all"
 
 
 class WarningCode(str, Enum):
@@ -390,7 +408,91 @@ class ExistingPrefixContext:
             _require_safe_observation(value, field_name)
 
 
-AnalysisContext: TypeAlias = ResolutionContext | ExistingPrefixContext
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProjectLockContext:
+    """Safe, explicit selection and measurement context for a project lock.
+
+    ``lock_identity`` is a domain-separated content fingerprint supplied by a
+    future reader.  This pure model deliberately neither reads a lockfile nor
+    derives identities from paths, timestamps, or ambient project state.
+    """
+
+    root_package: str
+    workspace_member: str | None
+    dependency_group_selection: DependencyGroupSelection
+    dependency_groups: tuple[str, ...]
+    extras: tuple[str, ...]
+    python_version: str
+    platform: str
+    architecture: str
+    path_flavor: PathFlavor
+    case_rule: CaseRule
+    uv_version: str
+    build_policy: BuildPolicy
+    compile_bytecode: bool
+    resolution_strategy: str = "highest"
+    lock_identity: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "root_package", normalize_distribution_name(self.root_package)
+        )
+        if self.workspace_member is not None:
+            member = normalize_distribution_name(self.workspace_member)
+            if member != self.root_package:
+                raise ValueError("workspace_member must equal root_package")
+            object.__setattr__(self, "workspace_member", member)
+        if not isinstance(self.dependency_group_selection, DependencyGroupSelection):
+            raise TypeError(
+                "dependency_group_selection must be a DependencyGroupSelection"
+            )
+        for field_name in ("dependency_groups", "extras"):
+            values = tuple(
+                sorted(
+                    {
+                        normalize_distribution_name(item)
+                        for item in _string_tuple(getattr(self, field_name), field_name)
+                    }
+                )
+            )
+            object.__setattr__(self, field_name, values)
+        if (
+            self.dependency_group_selection is DependencyGroupSelection.NONE
+            and self.dependency_groups
+        ):
+            raise ValueError("dependency_groups must be empty for selection none")
+        if (
+            self.dependency_group_selection is DependencyGroupSelection.EXPLICIT
+            and not self.dependency_groups
+        ):
+            raise ValueError(
+                "dependency_groups must not be empty for explicit selection"
+            )
+        for field_name in (
+            "python_version",
+            "platform",
+            "architecture",
+            "uv_version",
+            "resolution_strategy",
+        ):
+            _require_project_observation(getattr(self, field_name), field_name)
+        if not isinstance(self.path_flavor, PathFlavor):
+            raise TypeError("path_flavor must be a PathFlavor")
+        if not isinstance(self.case_rule, CaseRule):
+            raise TypeError("case_rule must be a CaseRule")
+        if not isinstance(self.build_policy, BuildPolicy):
+            raise TypeError("build_policy must be a BuildPolicy")
+        if not isinstance(self.compile_bytecode, bool):
+            raise TypeError("compile_bytecode must be a bool")
+        if not isinstance(self.lock_identity, str) or not _FINGERPRINT.fullmatch(
+            self.lock_identity
+        ):
+            raise ValueError("lock_identity must be a SHA-256 fingerprint")
+
+
+AnalysisContext: TypeAlias = (
+    ResolutionContext | ExistingPrefixContext | ProjectLockContext
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -488,9 +590,11 @@ class AnalysisResult:
     warnings: tuple[AnalysisWarning, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.context, (ResolutionContext, ExistingPrefixContext)):
+        if not isinstance(
+            self.context, (ResolutionContext, ExistingPrefixContext, ProjectLockContext)
+        ):
             raise TypeError(
-                "context must be a ResolutionContext or ExistingPrefixContext"
+                "context must be a ResolutionContext, ExistingPrefixContext, or ProjectLockContext"
             )
 
         distributions = tuple(self.distributions)

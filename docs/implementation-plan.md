@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 5: project/lockと比較分析（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P5-03a: project/lock context、schema、baseline/comparison projectionをpureに実装する |
+| 次のタスク | P5-03b: stableな上流schemaだけを読むproject/lock metadata adapterを実装する（blocked） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
-| Blocker | なし |
-| 次の成果物 | P5-03a: project/lock context、schema、baseline/comparison projection |
+| Blocker | P5-03b/P5-03c: numericかつstableな上流metadata schema待ち |
+| 次の成果物 | stableな上流metadata schemaの提供待ち |
 
 ## ステータス定義
 
@@ -247,7 +247,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-04f | Phase 4 | CLI policy input/precedence contractを実装する | `done` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `done` |
 | P5-02 | Phase 5 | project/lock analysis input/context contractを設計する | `done` |
-| P5-03a | Phase 5 | project/lock context、schema、baseline/comparison projectionをpureに実装する | `todo` |
+| P5-03a | Phase 5 | project/lock context、schema、baseline/comparison projectionをpureに実装する | `done` |
 | P5-03b | Phase 5 | stableな上流schemaだけを読むproject/lock metadata adapterを実装する | `blocked` |
 | P5-03c | Phase 5 | project/lock analysisをinstaller、CLI、README、local E2Eへ接続する | `blocked` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
@@ -971,6 +971,28 @@ P5-03b/P5-03cのblocker:
 次のタスク:
 
 - P5-03a: project/lock context、schema、baseline/comparison projectionをpureに実装する。上流stable schemaが未提供でも実行できるが、公開CLI optionとmetadata adapterは追加しない。
+
+### 2026-08-02: P5-03a project/lock pure context and projection
+
+状態: `done`
+
+実装:
+
+- `ProjectLockContext`と`DependencyGroupSelection`を追加した。root/member/group/extraはPEP 503正規化した安全なlabelとして保持し、`none`はempty groups、`explicit`はnon-empty groups、`all`はempty effective groupsも許可する。workspace memberを選ぶ場合はroot packageと同一であることを不変条件とした。lock identityは64桁のdomain-separated SHA-256 fingerprintだけを受け、path、lock bytes、mtime、source URL、opaque node IDをmodelへ持ち込まない。
+- Python/platform/architecture/uv/resolution strategyはURL、path、credential separator、whitespaceを含められないASCII symbolic tokenに制限し、v3 baseline decoderも同じ制約をfingerprint前に適用する。v3/v2 schemaは外部schema registryを必要としないself-containedな定義として、v1のclosed distribution/warning/side/change/nonreconciliation constraintsを複製し、v3 contextのselection modeとeffective group数の整合もschemaで固定する。
+- v1/v2 serializerには変更を加えず、schema v3専用のpure rendererとclosed analysis schemaを追加した。v3 baseline parser/projectionはproject contextを安全なcomparison modelへ縮約して読書きし、既存v1/v2 baseline parserの入力・出力を維持する。
+- project-lock baseline同士はselection/target/policy/resolution strategyが一致すれば比較可能とし、lock identityは互換性coreから除外した。comparison result v2専用rendererはidentity差をraw fingerprintなしの`lock_changed` boolでのみ表す。comparison v1 rendererは変更していない。
+- project model/selection、v3 round-trip、lock-only changeとcontext mismatchを固定するunit testを追加し、build verifierに新pure renderer modulesを含めた。metadata adapter、project/lock file I/O、atomic writer、CLI/READMEは実装していない。
+
+検証:
+
+- `uv run --locked pytest tests/test_project_lock_projection.py tests/test_models.py tests/test_json_render.py tests/test_baseline.py tests/test_diff.py tests/test_comparison_json_render.py -q` — 成功（217 passed）。
+- `uv run --locked ruff format --check ...`、`uv run --locked ruff check ...` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make ci-check`、`make test`、`uv lock --check`、`make verify-build`、`git diff --check` — 成功（796 passed, 2 skipped）。
+
+次のタスク:
+
+- P5-03bはblocked。P5-01で固定したとおり、numericかつstableと宣言された上流metadata schemaが提供されるまでadapter、project input reader、CLI接続を開始しない。
 
 ### 2026-08-02: P4-04f CLI policy input/precedence implementation
 

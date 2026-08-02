@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any, NoReturn, cast
 
 from .json_render import _requirement_projection
-from .models import AnalysisResult, ResolutionContext, normalize_distribution_name
+from .models import (
+    AnalysisResult,
+    ProjectLockContext,
+    ResolutionContext,
+    normalize_distribution_name,
+)
 
 MAX_BASELINE_BYTES = 8 * 1024 * 1024
 MAX_BASELINE_NESTING = 64
@@ -35,6 +40,7 @@ _SAFE_OBSERVATION = re.compile(
     r"^(?!\s)(?![\s\S]*\s$)(?![\s\S]*[\\/])(?!~)(?![A-Za-z]:)(?![\s\S]*\0)[\s\S]+$"
 )
 _INDEX_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_PROJECT_OBSERVATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$")
 _WARNING_CODES = frozenset(
     {
         "duplicate-ownership",
@@ -133,6 +139,25 @@ class BaselineExistingPrefixContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineProjectLockContext:
+    root_package: str
+    workspace_member: str | None
+    dependency_group_selection: str
+    dependency_groups: tuple[str, ...]
+    extras: tuple[str, ...]
+    python_version_fingerprint: str
+    platform_fingerprint: str
+    architecture_fingerprint: str
+    path_flavor: str
+    case_rule: str
+    uv_version_fingerprint: str
+    build_policy: str
+    compile_bytecode: bool
+    resolution_strategy_fingerprint: str
+    lock_identity: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BaselineDistribution:
     name: str
     version: str
@@ -166,6 +191,7 @@ class Baseline:
     duplicate_ownership: BaselineDuplicateOwnershipSummary
     resolution_context: BaselineResolutionContext | None
     existing_prefix_context: BaselineExistingPrefixContext | None
+    project_lock_context: BaselineProjectLockContext | None = None
 
 
 def _baseline_requirement_from_input(
@@ -195,14 +221,10 @@ def analysis_result_to_baseline(result: AnalysisResult) -> Baseline:
 
     if type(result) is not AnalysisResult:
         raise TypeError("result must be an exact AnalysisResult")
-    if type(result.context) is not ResolutionContext:
-        raise TypeError("result must have a fresh ResolutionContext")
+    if type(result.context) not in {ResolutionContext, ProjectLockContext}:
+        raise TypeError("result must have a fresh or project-lock context")
 
     context = result.context
-    requirements = tuple(
-        _baseline_requirement_from_input(index, requirement)
-        for index, requirement in enumerate(context.requirements)
-    )
     distributions = tuple(
         BaselineDistribution(
             name=distribution.name,
@@ -229,8 +251,10 @@ def analysis_result_to_baseline(result: AnalysisResult) -> Baseline:
         raise ValueError("analysis result exceeds baseline integer bounds")
 
     return Baseline(
-        schema_version=1,
-        input_kind="fresh-install",
+        schema_version=1 if type(context) is ResolutionContext else 3,
+        input_kind="fresh-install"
+        if type(context) is ResolutionContext
+        else "project-lock",
         measurement=BaselineMeasurement(
             kind="installed-logical-size",
             unit="bytes",
@@ -247,7 +271,10 @@ def analysis_result_to_baseline(result: AnalysisResult) -> Baseline:
             present=bool(duplicate_count), count=duplicate_count
         ),
         resolution_context=BaselineResolutionContext(
-            requirements=requirements,
+            requirements=tuple(
+                _baseline_requirement_from_input(index, requirement)
+                for index, requirement in enumerate(context.requirements)
+            ),
             python_version_fingerprint=_fingerprint(
                 "python_version", context.python_version
             ),
@@ -263,8 +290,33 @@ def analysis_result_to_baseline(result: AnalysisResult) -> Baseline:
             resolution_strategy_fingerprint=_fingerprint(
                 "resolution_strategy", context.resolution_strategy
             ),
-        ),
+        )
+        if type(context) is ResolutionContext
+        else None,
         existing_prefix_context=None,
+        project_lock_context=BaselineProjectLockContext(
+            root_package=context.root_package,
+            workspace_member=context.workspace_member,
+            dependency_group_selection=context.dependency_group_selection.value,
+            dependency_groups=context.dependency_groups,
+            extras=context.extras,
+            python_version_fingerprint=_fingerprint(
+                "python_version", context.python_version
+            ),
+            platform_fingerprint=_fingerprint("platform", context.platform),
+            architecture_fingerprint=_fingerprint("architecture", context.architecture),
+            path_flavor=context.path_flavor.value,
+            case_rule=context.case_rule.value,
+            uv_version_fingerprint=_fingerprint("uv_version", context.uv_version),
+            build_policy=context.build_policy.value,
+            compile_bytecode=context.compile_bytecode,
+            resolution_strategy_fingerprint=_fingerprint(
+                "resolution_strategy", context.resolution_strategy
+            ),
+            lock_identity=context.lock_identity,
+        )
+        if type(context) is ProjectLockContext
+        else None,
     )
 
 
@@ -306,6 +358,12 @@ def _nullable_observation(value: Any, field: str) -> str | None:
     if value is None:
         return None
     return _string(value, field, _SAFE_OBSERVATION)
+
+
+def _project_observation(value: Any, field: str) -> str:
+    """Validate a project target label before it can enter a fingerprint."""
+
+    return _string(value, field, _PROJECT_OBSERVATION)
 
 
 def _integer(value: Any, field: str) -> int:
@@ -598,9 +656,124 @@ def _validate_requirement(value: Any) -> BaselineRequirement:
     )
 
 
-def _validate_context(
+def _validate_context(  # noqa: PLR0912
     schema_version: int, value: Any
-) -> tuple[str, BaselineResolutionContext | None, BaselineExistingPrefixContext | None]:
+) -> tuple[
+    str,
+    BaselineResolutionContext | None,
+    BaselineExistingPrefixContext | None,
+    BaselineProjectLockContext | None,
+]:
+    if schema_version == 3:
+        document = _object(
+            value,
+            "context",
+            frozenset(
+                {
+                    "input_kind",
+                    "root_package",
+                    "workspace_member",
+                    "dependency_group_selection",
+                    "dependency_groups",
+                    "extras",
+                    "python_version",
+                    "platform",
+                    "architecture",
+                    "path_flavor",
+                    "case_rule",
+                    "uv_version",
+                    "build_policy",
+                    "compile_bytecode",
+                    "resolution_strategy",
+                    "lock_identity",
+                }
+            ),
+        )
+        _constant(document["input_kind"], "project-lock", "context.input_kind")
+        root_package = normalize_distribution_name(
+            _string(document["root_package"], "context.root_package", _NAME)
+        )
+        workspace_member = document["workspace_member"]
+        if workspace_member is not None:
+            workspace_member = normalize_distribution_name(
+                _string(workspace_member, "context.workspace_member", _NAME)
+            )
+            if workspace_member != root_package:
+                _error("inconsistent-context", "context.workspace_member")
+        selection = _string(
+            document["dependency_group_selection"],
+            "context.dependency_group_selection",
+        )
+        if selection not in {"none", "explicit", "all"}:
+            _error("invalid-value", "context.dependency_group_selection")
+
+        def names(field: str) -> tuple[str, ...]:
+            result = tuple(
+                sorted(
+                    normalize_distribution_name(_string(item, field + "[]", _NAME))
+                    for item in _array(document[field], field)
+                )
+            )
+            if len(result) != len(set(result)):
+                _error("invalid-value", field)
+            return result
+
+        groups, extras = names("dependency_groups"), names("extras")
+        if (selection == "none" and groups) or (selection == "explicit" and not groups):
+            _error("inconsistent-context", "context.dependency_groups")
+        if document["path_flavor"] not in {"posix", "windows"} or document[
+            "case_rule"
+        ] not in {"sensitive", "insensitive"}:
+            _error("invalid-value", "context")
+        return (
+            "project-lock",
+            None,
+            None,
+            BaselineProjectLockContext(
+                root_package=root_package,
+                workspace_member=workspace_member,
+                dependency_group_selection=selection,
+                dependency_groups=groups,
+                extras=extras,
+                python_version_fingerprint=_fingerprint(
+                    "python_version",
+                    _project_observation(
+                        document["python_version"], "context.python_version"
+                    ),
+                ),
+                platform_fingerprint=_fingerprint(
+                    "platform",
+                    _project_observation(document["platform"], "context.platform"),
+                ),
+                architecture_fingerprint=_fingerprint(
+                    "architecture",
+                    _project_observation(
+                        document["architecture"], "context.architecture"
+                    ),
+                ),
+                path_flavor=document["path_flavor"],
+                case_rule=document["case_rule"],
+                uv_version_fingerprint=_fingerprint(
+                    "uv_version",
+                    _project_observation(document["uv_version"], "context.uv_version"),
+                ),
+                build_policy=_validate_build_policy(document["build_policy"]),
+                compile_bytecode=_boolean(
+                    document["compile_bytecode"], "context.compile_bytecode"
+                ),
+                resolution_strategy_fingerprint=_fingerprint(
+                    "resolution_strategy",
+                    _project_observation(
+                        document["resolution_strategy"], "context.resolution_strategy"
+                    ),
+                ),
+                lock_identity=_string(
+                    document["lock_identity"],
+                    "context.lock_identity",
+                    re.compile(r"^[0-9a-f]{64}$"),
+                ),
+            ),
+        )
     common = {
         "requirements",
         "python_version",
@@ -656,6 +829,7 @@ def _validate_context(
                 path_flavor=document["path_flavor"],
                 case_rule=document["case_rule"],
             ),
+            None,
         )
     requirements = tuple(
         _validate_requirement(item)
@@ -714,6 +888,7 @@ def _validate_context(
                 _string(document["resolution_strategy"], "context.resolution_strategy"),
             ),
         ),
+        None,
         None,
     )
 
@@ -782,11 +957,11 @@ def parse_baseline_json(  # noqa: PLR0912, PLR0915
         ),
     )
     schema_version = _integer(root["schema_version"], "schema_version")
-    if schema_version not in {1, 2}:
+    if schema_version not in {1, 2, 3}:
         _error("unsupported-schema", "schema_version")
     measurement = _validate_measurement(root["measurement"])
-    input_kind, resolution_context, existing_prefix_context = _validate_context(
-        schema_version, root["context"]
+    input_kind, resolution_context, existing_prefix_context, project_lock_context = (
+        _validate_context(schema_version, root["context"])
     )
     (
         distributions,
@@ -877,6 +1052,7 @@ def parse_baseline_json(  # noqa: PLR0912, PLR0915
         ),
         resolution_context=resolution_context,
         existing_prefix_context=existing_prefix_context,
+        project_lock_context=project_lock_context,
     )
 
 
