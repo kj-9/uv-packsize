@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-07-31
+最終更新: 2026-08-02
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P4-04e: CLI policy input/precedence contractを設計する |
+| 次のタスク | P4-04f: CLI policy input/precedence contractを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-04e: CLI policy input/precedence design |
+| 次の成果物 | P4-04f: CLI policy input/precedence implementation |
 
 ## ステータス定義
 
@@ -243,7 +243,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-04b | Phase 4 | budget text/result presentation contractをpureに設計・実装する | `done` |
 | P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `done` |
 | P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `done` |
-| P4-04e | Phase 4 | CLI policy input/precedence contractを設計する | `todo` |
+| P4-04e | Phase 4 | CLI policy input/precedence contractを設計する | `done` |
+| P4-04f | Phase 4 | CLI policy input/precedence contractを実装する | `todo` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -881,7 +882,8 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-04b | `done` | P4-04a | `uv_packsize/budget_render.py`（新規）、`tests/test_budget_render.py`（新規）、`scripts/verify_build.py` | exactな`BudgetEvaluation`だけを再検証して受けるsafeかつdeterministicなtext presentationを実装した。canonical global authority、configured metric、no-op、completeness policy、fixed violation orderをpureに表示し、CLI/config/JSON schema/exit codeは変更しない。 |
 | P4-04c | `done` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`scripts/verify_build.py`、`docs/implementation-plan.md` | exact built-in `dict`だけをtrusted policy mappingとして受ける`parse_budget_policy()`を実装した。closed snake_case keys、missing field/default no-op、exact nonbool integer range、exact incomplete-policy string、unknown/type/range/incomplete-policy/internal-inputのfixed taxonomyとpriority、safe enum field/path付きsanitized typed errorをunit testで固定した。CLI、`pyproject.toml` I/O、exit code、CIは未接続。 |
 | P4-04d | `done` | P4-04c | `uv_packsize/budget_config_source.py`、`tests/test_budget_config_source.py`、`tests/test_verify_build.py`、`pyproject.toml`、`uv.lock`、`scripts/verify_build.py`、`docs/implementation-plan.md` | explicit native `Path`だけを受ける`load_budget_policy()`を実装した。`[tool.uv-packsize.budget]`不在は`None`、明示空tableはno-op policyとし、nonblocking bounded regular-file read、open前後identity照合、TOML/section/source errorのsanitized typed taxonomyを固定した。Python 3.10ではconditional runtime `tomli`、3.11+ではstdlib `tomllib`を使い、artifact metadataのmarkerを厳密に検証する。CLI option、budget exit code、README、CI workflowは未接続。 |
-| P4-04e | `todo` | P4-04d | `docs/implementation-plan.md`（設計）、必要に応じて`uv_packsize/cli.py`、`README.md`、test | CLIへbudget policy sourceを接続する前に、explicit config optionの名称、cwd/upward discoveryの有無、CLI flagsとのprecedence、section不在/no-op/file failureのexit・stderr・stdout契約、compare要否、既存CLI不変性を設計として固定する。P4-04dのsource adapterが行う読み込み以外のsource探索・mergeは追加しない。 |
+| P4-04e | `done` | P4-04d | `docs/implementation-plan.md`、`docs/roadmap.md` | 公開する`--budget-config PATH`、`--max-total BYTES`、`--max-increase BYTES`、`--incomplete-policy`、明示sourceのみ・field単位のCLI優先、no-source/no-op/incomplete/比較/失敗のexit・stdout・stderr、fresh/write/JSON/prefixとの境界を実装可能な契約として固定した。 |
+| P4-04f | `todo` | P4-04e | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py`、必要ならbudget CLI専用test | P4-04eの契約どおりpolicy source/CLI override/evaluation/render/exit 5を接続する。source/CLI precedence、sourceなし・明示no-op、incomplete fail/allow-partial、increaseのbaseline requirement、text/JSON/comparison JSON/write/prefix/errorのstdout/stderr不変性をnetwork-free unit/local-wheel testで固定し、READMEの公開契約とCI利用例を追加する。 |
 
 検証:
 
@@ -890,9 +892,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P4-04eとする。CLIへpolicy sourceを接続する前に、option/source precedence、未設定・不完全測定・failure時のexit/stdout/stderr契約を設計として固定する。CI exampleは別タスクに残す。
+- P4-04fとする。P4-04eで固定したCLI policy input/precedence contractを、既存のanalysis/diff/baseline write公開境界を崩さず実装・README・network-free testへ接続する。CI workflow自体は別タスクに残す。
 
 ## 作業記録
+
+### 2026-08-02: P4-04e CLI policy input/precedence contract
+
+状態: `done`
+
+設計判断:
+
+- policyを有効にする入力は、明示的な`--budget-config PATH`、`--max-total BYTES`、`--max-increase BYTES`、`--incomplete-policy {fail,allow-partial}`の4種だけとする。`--budget-config`はP4-04dの`load_budget_policy()`へそのまま渡す`pyproject.toml` pathであり、cwdの既定`pyproject.toml`、親directory探索、環境変数、複数config file、profile、includeは導入しない。`--max-total`と`--max-increase`はcanonical global logical bytesの非負base-10整数で、`MAX_BASELINE_INTEGER`までを受理する。`--incomplete-policy`はdomain enumの2値だけを受理する。公開flagとconfig fieldは異なる名前でも、同じ`BudgetPolicy`の3 fieldを指定する。
+- sourceは一つだけで、mergeはconfig policyへのCLI field overrideに限る。`--budget-config`のtableが存在する場合はその3 fieldをbaseとし、CLIで明示された同名fieldだけが置換する。CLIにないfieldはconfig値を維持し、config sourceがない場合の未指定fieldは`BudgetPolicy`のdefaultへ落とす。したがって`--max-total`とconfigの`max_increase_logical_bytes`は同時に有効になり得る一方、別file、cwd discovery、environment、既存baselineから値を補うことはない。config section不在はsource policyなし、明示空tableまたはlimitを持たないCLI指定はexplicit no-op policyであり、空tableを設定エラーや暗黙のdefault sourceと扱わない。
+- policyはfresh-install analysisだけを対象にする。`--prefix`とpolicy入力の任意の組合せはusage errorとし、prefix inventory/JSON v2へbudgetを後付けしない。`--write-baseline`はfresh policyと併用できるが、policy evaluationがpassするまでbaselineをrender/publishしない。`--baseline`は従来どおり任意であり、effective policyが`max_increase_logical_bytes`を持つときだけ必須とする。baselineの自動発見、writeしたbaselineを同runでcomparison inputにすること、既存-prefix schema v2との比較は許可しない。total-only policyの`--baseline`比較は従来どおり可能だが、budget判断はcurrent canonical global totalだけを使い、baseline側のincompleteness/nonreconciliationを追加判断しない。
+- `max_increase` policyでは、既存の互換性検査に成功したfresh v1 comparisonからcanonical global logical-size deltaだけを読む。distribution-owned aggregate delta、distribution別delta、nonreconciliationはbudget authorityにしない。comparisonなし・incompatible comparison・baseline read failureをpartialなbudget evaluationへすり替えない。comparisonなしはusage error、互換性なしは既存exit 4、baseline load failureは既存exit 3とする。
+- effective policyが存在するときだけ`analysis_result_to_baseline()`後に`evaluate_budget()`を呼ぶ。limitを一つでも持つpolicyでは、defaultの`fail`がcurrent incompletenessを、increase policyではbaseline/currentを合わせたcomparison incompletenessをviolationにする。`allow-partial`はincomplete violationだけを抑止し、観測済みcanonical total/deltaの上限判定は続ける。policy非選択時は、既存のincomplete analysis/comparisonのexit 0と表示を完全に維持する。explicit no-op policyはevaluation/render対象だが、limitを持たないためcompletenessを評価せずpassする。
+- option shapeのguard（`--prefix`排他、数値/choice、既存baseline/write/json排他）はconfig read、baseline read、`uv`検出、venv作成より先に固定順で実行する。次に`--budget-config`だけをreadし、P4-04d source errorまたはP4-04c field errorはraw path/TOML/valueを出さないexit 3へ正規化する。effective `max_increase`の`--baseline` requirementはsourceを解決してから、baseline readと外部processより前にexit 2で判定する。この順序により、invalid sourceを無視して別sourceやdefaultへfall backしない。
+- policyなしでは全existing CLIのstdout、stderr、exit code、baseline write timing、JSON schema/bytesを変更しない。policyありのtext modeではprimary analysis reportまたはdiff reportの後にpure `render_budget_report()`を一度だけappendする。policy violationは測定/比較自体が完了した判断結果なので、text stdoutにはprimary resultと`Result: FAIL`/violation sectionsを残し、exit 5と固定のsanitized stderr summaryを返す。install/analysis/render/source/baseline failureとは区別し、raw config/baseline/package/pathを診断へ反射しない。
+- `--json`と`--comparison-json`は既存のversioned documentだけをstdoutへ出すclosed contractのままとする。policy pass時のstdout bytesは対応するpolicyなしcommandと完全一致し、budget用JSONやtext sectionを追加しない。policy violation時はstdoutを空にし、exit 5とsafeなbudget report/summaryだけをstderrへ出す。`--write-baseline`併用時もviolationではtargetを作成・更新しない。これによりmachine-readable stdoutは成功時だけconsumeでき、analysis JSON v1/v2とcomparison JSON v1のschemaを変更しない。
+- exit codeは、成功（policyなし、no-op、pass、allow-partialを含む）を0、既存operational failureを1、usageを2、baseline/config source/atomic write failureを3、incompatible comparisonを4、budget violationを5と固定する。source/CLI parse、incomplete、limit超過、no-op、text/JSON/comparison JSON/writeの組合せをP4-04fのnetwork-free unit/local-wheel testで固定する。READMEへのpublic option/CI exampleは実装完了時にだけ追加し、この設計taskでは未実装optionを公開しない。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_budget.py tests/test_budget_render.py tests/test_budget_config.py tests/test_budget_config_source.py -q` — 成功（後続CLI接続が依存するpure policy/source contractの回帰なし）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（769 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P4-04fでこの契約をCLI/README/testへ接続する。P4-04eは設計だけを更新し、未実装のpublic CLI help/READMEやJSON schemaを先行変更していない。
 
 ### 2026-07-31: P4-04d pyproject budget policy source
 
@@ -2135,4 +2164,4 @@ uv run --locked python scripts/verify_build.py dist
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない | P6-01（上流連携） | `todo` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
-| F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04eまたはconfig source hardening | `todo` |
+| F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
