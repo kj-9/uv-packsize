@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 4: CIでの継続管理（`done`） |
+| 現在のPhase | Phase 5: project/lockと比較分析（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P5-01: `uv workspace metadata`の対応schemaを調査・固定する |
+| 次のタスク | P5-02: project/lock analysis input/context contractを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P5-01: `uv workspace metadata`の対応schema調査 |
+| 次の成果物 | P5-02: project/lock analysis input/context contract |
 
 ## ステータス定義
 
@@ -69,7 +69,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 2 | 信頼できる測定エンジン | `done` |
 | Phase 3 | サイズの理由を説明する | `done` |
 | Phase 4 | CIでの継続管理 | `done` |
-| Phase 5 | project/lockと比較分析 | `todo` |
+| Phase 5 | project/lockと比較分析 | `in_progress` |
 | Phase 6 | エコシステム連携 | `todo` |
 
 詳細な目的と判断背景は[`roadmap.md`](./roadmap.md)を参照する。
@@ -245,7 +245,8 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `done` |
 | P4-04e | Phase 4 | CLI policy input/precedence contractを設計する | `done` |
 | P4-04f | Phase 4 | CLI policy input/precedence contractを実装する | `done` |
-| P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
+| P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `done` |
+| P5-02 | Phase 5 | project/lock analysis input/context contractを設計する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
 ### P2-01: AnalysisResultとfile inventoryのデータモデル設計
@@ -892,9 +893,40 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P5-01とする。`uv workspace metadata`の対応schemaを調査・固定する。
+- P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-02: P5-01 `uv workspace metadata` schema investigation and compatibility boundary
+
+状態: `done`
+
+調査根拠:
+
+- ローカルの`uv 0.11.3 (45da18ac3 2026-04-01 aarch64-apple-darwin)`に対し、既存のfreshな`uv.lock`を使って`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv workspace metadata --locked --offline --no-progress --preview-features workspace-metadata`を実行した。network accessもprojectへの書込みも行わず、stdoutはJSONだけ、stderrはresolution progressだけだった。preview feature flagを省略した場合は、experimental warningがstderrへ追加されたがstdout bytesは同一だった。
+- CLI helpはこのcommandの出力を「not yet stable」と明記する。JSONのtop-levelは`schema`、`workspace_root`、`requires_python`、`conflicts`、`members`、`resolution`であり、`schema.version`はnumeric versionではなく`"preview"`だった。`members`のentryは`name`、`path`、`id`、`resolution`はopaque IDからnodeへのmapである。通常package nodeには`name`、`version`、`source`、`kind: "package"`、`dependencies`、`dependency_groups`、artifact fieldsがあり、group nodeは`kind: {"group": NAME}`を持つ。dependency edgeは`id`と任意の`marker`を持つ。
+- このprojectではroot package nodeが`dependency_groups`からgroup nodeへ参照し、group nodeがgroup dependencyへ参照した。したがって、command outputはlock graphの候補ではあるが、selected groups/extrasを表す安定したpublic analysis inputとして扱うこともできない。workspace/member path、source、node IDにはabsolute local path、index URL、潜在的なcredentialが混入し得る。
+
+設計判断:
+
+- 採用可能なstable machine-readable schemaは現時点で存在しない。`schema.version == "preview"`はschema compatibility boundaryではないため、`uv-packsize`の通常CLI、baseline、comparison JSON、budget/CIにこのcommandのJSONを入力しない。P5-01は「preview schemaを非対応として固定する」調査設計タスクであり、code/fixtureは追加しない。
+- 将来のproduction adapterは、上流がnumericで安定と宣言するschema versionを返す場合だけ、その値をallowlistで受ける。未知のversion、欠損/非numeric version、unknown required semantic、stdout JSON以外、nonzero exitはsafe typed failureとして扱い、推測やpartial graphへのfallbackをしない。adapterは`--locked`でlock freshnessを検査し、version確認とJSON parse/shape validationをsubprocess boundaryへ閉じ込める。
+- どうしてもpreviewを検証する開発専用opt-inを追加する場合は、`uv` executableを完全一致`0.11.3`に固定し、`--preview-features workspace-metadata`、`--locked`、`schema.version == "preview"`、required object/array/string shapeをすべて検査する。これは上流更新時に必ずrejectする短期compatibility pinであり、公開resultやbaselineにpreview-derived graphを保存しない。絶対path、source URL、opaque ID、uv diagnosticsを利用者向けoutputへ反射しない。
+- 次の最小単位はP5-02のproject/lock analysis input/context contractである。root package、workspace member、dependency group、extras、Python/platform、lock identityをどうpublic resultへ安全に投影するかを、workspace-metadata adapterを実装せずに決める。stable schemaの提供後に、そのcontractへisolated adapter/parserとnetwork-free fixtureを接続する。
+
+検証:
+
+- `uv --version` — 成功（`uv 0.11.3`）。
+- `uv help workspace metadata` — 成功。previewかつoutputがunstableであること、`--locked`/`--frozen`/`--dry-run`の存在を確認。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv workspace metadata --locked --offline --no-progress --preview-features workspace-metadata` — 成功（stdout JSON 47,568 bytes、stderr progressのみ）。
+- `jq`による上記JSONのtop-level、member、package/group node、dependency edge shape inspection — 成功（network-free）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make test` — 成功（782 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv lock --check`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P5-02: project/lock analysis input/context contractを設計する。stable versioned schemaが提供されるまで、`uv workspace metadata` adapterを実装しない。
 
 ### 2026-08-02: P4-04f CLI policy input/precedence implementation
 

@@ -213,7 +213,9 @@ distributionごとの合計だけではなく、ファイル単位で次を保�
 
 任意のrequirementsをインストールするモードでは、インストール済みCore Metadataの`Requires-Dist`とenvironment markersからグラフを構築する。
 
-uvプロジェクトやlockfileを分析するモードでは、[`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)のJSONを利用する。ただし現在はpreview schemaなので、対応schemaとuv versionを検査し、未知のschemaを黙って解釈しない。
+uvプロジェクトやlockfileを分析するモードでは、[`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)のJSONを候補とする。ただし、P5-01で確認した`uv 0.11.3`の出力は`schema.version: "preview"`であり、CLI helpも出力が安定していないと明記している。この値は互換性を表すversionではないため、通常のCLI、baseline、CI比較の入力としてはまだ採用しない。
+
+将来のadapterは、上流がnumericかつ安定と宣言したschema versionを出力し、そのversionをこのプロジェクトが明示的に支持してから追加する。previewの間に実験する場合も、`uv` executableの完全一致version、`schema.version == "preview"`、必要なtop-level fieldとnode fieldの型をすべて検査する隔離されたopt-inに限る。node ID、workspace/member path、source URLはローカルpathやcredentialを含み得るためopaqueな入力とし、公開result、baseline、利用者向けdiagnosticへ出力しない。
 
 ### Policy
 
@@ -332,7 +334,7 @@ Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b�
 実施項目:
 
 - `pyproject.toml`、`uv.lock`、dependency groupsを入力として扱う。
-- `uv workspace metadata`からlock graphを取得する。
+- stableかつversionedなschemaが利用可能になった後だけ、`uv workspace metadata`からlock graphを取得する。`schema.version: "preview"`だけの出力はP5-01で非対応と固定した。
 - package version、extras、Python version、platform間を比較する。
 - installed logical sizeとcompressed wheel sizeを並べる。
 - Linux wheelをmacOSやWindows上で分析するwheel-onlyモードを追加する。
