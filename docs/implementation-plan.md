@@ -8,13 +8,13 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 4: CIでの継続管理（`in_progress`） |
+| 現在のPhase | Phase 4: CIでの継続管理（`done`） |
 | `in_progress` | なし |
-| 次のタスク | P4-04f: CLI policy input/precedence contractを実装する |
+| 次のタスク | P5-01: `uv workspace metadata`の対応schemaを調査・固定する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし |
-| 次の成果物 | P4-04f: CLI policy input/precedence implementation |
+| 次の成果物 | P5-01: `uv workspace metadata`の対応schema調査 |
 
 ## ステータス定義
 
@@ -68,7 +68,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 1 | リリース品質の回復 | `done` |
 | Phase 2 | 信頼できる測定エンジン | `done` |
 | Phase 3 | サイズの理由を説明する | `done` |
-| Phase 4 | CIでの継続管理 | `in_progress` |
+| Phase 4 | CIでの継続管理 | `done` |
 | Phase 5 | project/lockと比較分析 | `todo` |
 | Phase 6 | エコシステム連携 | `todo` |
 
@@ -244,7 +244,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P4-04c | Phase 4 | budget policy inputのpure parser/normalizer contractを設計・実装する | `done` |
 | P4-04d | Phase 4 | pyproject policy source resolution/file I/O contractを設計・実装する | `done` |
 | P4-04e | Phase 4 | CLI policy input/precedence contractを設計する | `done` |
-| P4-04f | Phase 4 | CLI policy input/precedence contractを実装する | `todo` |
+| P4-04f | Phase 4 | CLI policy input/precedence contractを実装する | `done` |
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -883,7 +883,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 | P4-04c | `done` | P4-04b | `uv_packsize/budget_config.py`（新規）、`tests/test_budget_config.py`（新規）、`scripts/verify_build.py`、`docs/implementation-plan.md` | exact built-in `dict`だけをtrusted policy mappingとして受ける`parse_budget_policy()`を実装した。closed snake_case keys、missing field/default no-op、exact nonbool integer range、exact incomplete-policy string、unknown/type/range/incomplete-policy/internal-inputのfixed taxonomyとpriority、safe enum field/path付きsanitized typed errorをunit testで固定した。CLI、`pyproject.toml` I/O、exit code、CIは未接続。 |
 | P4-04d | `done` | P4-04c | `uv_packsize/budget_config_source.py`、`tests/test_budget_config_source.py`、`tests/test_verify_build.py`、`pyproject.toml`、`uv.lock`、`scripts/verify_build.py`、`docs/implementation-plan.md` | explicit native `Path`だけを受ける`load_budget_policy()`を実装した。`[tool.uv-packsize.budget]`不在は`None`、明示空tableはno-op policyとし、nonblocking bounded regular-file read、open前後identity照合、TOML/section/source errorのsanitized typed taxonomyを固定した。Python 3.10ではconditional runtime `tomli`、3.11+ではstdlib `tomllib`を使い、artifact metadataのmarkerを厳密に検証する。CLI option、budget exit code、README、CI workflowは未接続。 |
 | P4-04e | `done` | P4-04d | `docs/implementation-plan.md`、`docs/roadmap.md` | 公開する`--budget-config PATH`、`--max-total BYTES`、`--max-increase BYTES`、`--incomplete-policy`、明示sourceのみ・field単位のCLI優先、no-source/no-op/incomplete/比較/失敗のexit・stdout・stderr、fresh/write/JSON/prefixとの境界を実装可能な契約として固定した。 |
-| P4-04f | `todo` | P4-04e | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py`、必要ならbudget CLI専用test | P4-04eの契約どおりpolicy source/CLI override/evaluation/render/exit 5を接続する。source/CLI precedence、sourceなし・明示no-op、incomplete fail/allow-partial、increaseのbaseline requirement、text/JSON/comparison JSON/write/prefix/errorのstdout/stderr不変性をnetwork-free unit/local-wheel testで固定し、READMEの公開契約とCI利用例を追加する。 |
+| P4-04f | `done` | P4-04e | `uv_packsize/cli.py`、`README.md`、`tests/test_uv_packsize.py`、`tests/test_local_wheel_integration.py`、必要ならbudget CLI専用test | P4-04eの契約どおりpolicy source/CLI override/evaluation/render/exit 5を接続する。source/CLI precedence、sourceなし・明示no-op、incomplete fail/allow-partial、increaseのbaseline requirement、text/JSON/comparison JSON/write/prefix/errorのstdout/stderr不変性をnetwork-free unit/local-wheel testで固定し、READMEの公開契約とCI利用例を追加する。 |
 
 検証:
 
@@ -892,9 +892,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 最初の次タスク:
 
-- P4-04fとする。P4-04eで固定したCLI policy input/precedence contractを、既存のanalysis/diff/baseline write公開境界を崩さず実装・README・network-free testへ接続する。CI workflow自体は別タスクに残す。
+- P5-01とする。`uv workspace metadata`の対応schemaを調査・固定する。
 
 ## 作業記録
+
+### 2026-08-02: P4-04f CLI policy input/precedence implementation
+
+状態: `done`
+
+実装:
+
+- `--budget-config PATH`、`--max-total BYTES`、`--max-increase BYTES`、`--incomplete-policy {fail,allow-partial}`を接続した。sourceは明示pathだけを読み、configのpolicyをbaseとしてCLIで明示したfieldだけを上書きする。source table不在はpolicyなし、明示empty tableとCLI incomplete policy単独はevaluation/renderされるno-opとして保持する。
+- policy入力はprefix modeでexternal I/O前にusage errorとし、source failureをpath/TOML/valueを含まないexit 3へ正規化した。effective increase limitのbaseline必須判定はsource読込後・baseline読込/uv起動前に行う。
+- fresh resultをbaseline projectionへ変換してpolicyを評価し、comparison branchの既存early returnを維持した。textではprimary analysis/diff reportの後にbudget reportを一度だけ追加する。JSON/comparison JSONはpass時に既存bytesを保ち、violation時はstdoutを空、safe budget reportとsummaryをstderr、exit 5とした。policy violationではbaselineを書き込まない。
+- READMEへsource/field precedence、no-op/incomplete、baseline requirement、JSON/write/prefix/exit contractとCI command exampleを追加した。CI workflow自体は次の統合作業として未変更である。
+
+テスト:
+
+- unit CLI coverageでhelp、全4種のprefix guard、source failure precedence、source+CLI field overrideとcross-field保持、no-op、incomplete fail/allow-partial、max increase comparison JSON failure、text report ordering/stderr summary、policy pass時のanalysis/comparison JSON bytes+stderr不変、write suppressionを追加した。
+- local wheel E2Eでreal `uv` installのconfig total violation、JSON stdout empty、stderr report、baseline write suppressionを追加した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_budget.py tests/test_budget_config.py tests/test_budget_config_source.py tests/test_budget_render.py tests/test_uv_packsize.py tests/test_local_wheel_integration.py -q` — 成功（201 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 成功（782 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P5-01で`uv workspace metadata`の対応schemaを調査・固定する。
 
 ### 2026-08-02: P4-04e CLI policy input/precedence contract
 

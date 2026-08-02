@@ -63,6 +63,14 @@ Options:
                                   stdout.
   --comparison-json               Write the versioned baseline comparison result
                                   as JSON to stdout.
+  --budget-config PATH            Read budget policy from [tool.uv-
+                                  packsize.budget] in PATH.
+  --max-total BYTES               Maximum canonical global logical size in
+                                  bytes.  [0<=x<=9223372036854775807]
+  --max-increase BYTES            Maximum canonical global logical-size increase
+                                  in bytes.  [0<=x<=9223372036854775807]
+  --incomplete-policy [fail|allow-partial]
+                                  Budget handling for incomplete measurements.
   --explain                       Text output only: show installed-metadata
                                   dependency paths and attribution.
   --breakdown                     Text output only: show global file-category
@@ -284,6 +292,62 @@ unsupported platforms, keep using the portable existing path:
 
 ```bash
 uv-packsize requests==2.32.5 --json > baseline.json
+```
+
+### Size budgets
+
+Apply an explicit size policy to a fresh-install analysis with a project file,
+individual command-line limits, or both. There is no automatic `pyproject.toml`
+discovery: `--budget-config` reads exactly the path supplied and uses only its
+`[tool.uv-packsize.budget]` table.
+
+```toml
+[tool.uv-packsize.budget]
+max_total_logical_bytes = 52428800
+max_increase_logical_bytes = 1048576
+incomplete_policy = "fail"
+```
+
+```bash
+uv-packsize requests==2.32.5 --budget-config pyproject.toml
+uv-packsize requests==2.32.5 --baseline baseline.json \
+  --budget-config pyproject.toml --max-increase 524288
+```
+
+`--max-total` and `--max-increase` accept non-negative decimal bytes and apply
+to canonical global logical bytes, never distribution-owned aggregates. A
+policy file supplies the base policy; each explicitly supplied CLI field
+overrides only its corresponding field, while unspecified fields remain from
+the file. An absent budget table supplies no policy, while an explicit empty
+table or `--incomplete-policy` alone is a valid no-op policy.
+
+An increase limit requires `--baseline`; the comparison must pass the existing
+schema-v1 compatibility checks before the delta can be evaluated. Total-only
+policies do not use baseline size, completeness, or nonreconciliation as a
+budget input. By default, a policy with a limit fails incomplete measurements;
+`--incomplete-policy allow-partial` suppresses only that incomplete-result
+violation and still evaluates observed total and increase limits.
+
+Text output appends a Size Budget report to the regular analysis or comparison
+report. A budget violation exits with status 5 after that completed text
+report. With `--json` or `--comparison-json`, successful policy runs retain
+the exact pre-existing JSON bytes, while a violation writes no standard output
+and instead emits the safe budget report and summary on standard error before
+exiting 5. A `--write-baseline` target is rendered and published only after the
+policy passes, so a violation never creates or replaces it.
+
+Budget policy inputs are unavailable with `--prefix`; existing-prefix JSON v2
+is not retroactively budgeted. Invalid explicit policy sources and policy
+fields use status 3 without echoing local paths or TOML values. Existing status
+codes remain unchanged: operational failures use 1, usage errors 2, baseline
+and policy-source failures 3, and incompatible baselines 4.
+
+For CI, commit the policy in the project file and make the baseline an explicit
+artifact or tracked file:
+
+```bash
+uv-packsize -p 3.12 --budget-config pyproject.toml \
+  --baseline .ci/uv-packsize-baseline.json 'your-package==1.2.3'
 ```
 
 ### Dependency explanations

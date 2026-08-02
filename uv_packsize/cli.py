@@ -13,6 +13,7 @@ import click
 
 from uv_packsize.analysis import AnalysisContextError, analyze_installed_environment
 from uv_packsize.baseline import (
+    MAX_BASELINE_INTEGER,
     BaselineError,
     analysis_result_to_baseline,
     load_baseline,
@@ -22,6 +23,19 @@ from uv_packsize.baseline_write import (
     render_fresh_baseline,
     write_baseline,
 )
+from uv_packsize.budget import (
+    BudgetEvaluation,
+    BudgetEvaluationError,
+    BudgetPolicy,
+    IncompleteBudgetPolicy,
+    evaluate_budget,
+)
+from uv_packsize.budget_config import BudgetPolicyConfigError
+from uv_packsize.budget_config_source import (
+    BudgetPolicySourceError,
+    load_budget_policy,
+)
+from uv_packsize.budget_render import render_budget_report
 from uv_packsize.comparison_json_render import render_comparison_json
 from uv_packsize.dependency_paths import explain_dependency_paths
 from uv_packsize.diff import IncompatibleComparisonError, compare_baselines
@@ -83,6 +97,12 @@ class _ComparisonClickError(click.ClickException):
     exit_code = 4
 
 
+class _BudgetClickError(click.ClickException):
+    """A typed public boundary for completed budget-policy violations."""
+
+    exit_code = 5
+
+
 def _baseline_failure_message(error: BaselineError) -> str:
     """Return a diagnostic containing only fixed baseline identifiers."""
 
@@ -101,6 +121,23 @@ def _baseline_write_failure_message(error: BaselineWriteError) -> str:
     """Return the deliberately path-free baseline publication diagnostic."""
 
     return f"Could not write baseline (code={error.code}, field={error.field})."
+
+
+def _budget_source_failure_message(error: Exception) -> str:
+    """Return a fixed diagnostic without source paths or configuration values."""
+
+    if isinstance(error, BudgetPolicySourceError):
+        return (
+            "Could not load budget policy "
+            f"(code={error.reason.value}, field={error.section.value})."
+        )
+    if isinstance(error, BudgetPolicyConfigError):
+        field = "policy" if error.field is None else error.field.value
+        return (
+            "Could not validate budget policy "
+            f"(code={error.reason.value}, field={field})."
+        )
+    raise TypeError("error must be an expected budget source failure")
 
 
 def _run_uv(command):
@@ -314,6 +351,28 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Write the versioned baseline comparison result as JSON to stdout.",
 )
 @click.option(
+    "--budget-config",
+    type=click.Path(path_type=Path),
+    help="Read budget policy from [tool.uv-packsize.budget] in PATH.",
+)
+@click.option(
+    "--max-total",
+    type=click.IntRange(min=0, max=MAX_BASELINE_INTEGER),
+    metavar="BYTES",
+    help="Maximum canonical global logical size in bytes.",
+)
+@click.option(
+    "--max-increase",
+    type=click.IntRange(min=0, max=MAX_BASELINE_INTEGER),
+    metavar="BYTES",
+    help="Maximum canonical global logical-size increase in bytes.",
+)
+@click.option(
+    "--incomplete-policy",
+    type=click.Choice([policy.value for policy in IncompleteBudgetPolicy]),
+    help="Budget handling for incomplete measurements.",
+)
+@click.option(
     "--explain",
     is_flag=True,
     help="Text output only: show installed-metadata dependency paths and attribution.",
@@ -345,6 +404,10 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     bin,
     json_output,
     comparison_json,
+    budget_config,
+    max_total,
+    max_increase,
+    incomplete_policy,
     explain,
     breakdown,
     contributions,
@@ -358,6 +421,14 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         raise click.UsageError("--overwrite-baseline requires --write-baseline.")
     if write_baseline_path is not None:
         _validate_write_baseline_options(prefix=prefix, baseline=baseline)
+
+    _validate_budget_prefix_options(
+        prefix=prefix,
+        budget_config=budget_config,
+        max_total=max_total,
+        max_increase=max_increase,
+        incomplete_policy=incomplete_policy,
+    )
 
     if baseline is not None:
         _validate_baseline_options(
@@ -373,6 +444,17 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             site_packages_relative=site_packages_relative,
             case_rule=case_rule,
         )
+    policy = _load_effective_budget_policy(
+        budget_config=budget_config,
+        max_total=max_total,
+        max_increase=max_increase,
+        incomplete_policy=incomplete_policy,
+    )
+    if policy is not None and policy.max_increase_logical_bytes is not None:
+        if baseline is None:
+            raise click.UsageError("--max-increase requires --baseline.")
+
+    if baseline is not None:
         try:
             comparison_baseline = load_baseline(baseline)
         except BaselineError as error:
@@ -466,10 +548,20 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         ) as error:
             raise click.ClickException(_analysis_failure_message(error)) from None
 
+        current_baseline = None
+        diff = None
+        if comparison_baseline is not None or policy is not None:
+            try:
+                current_baseline = analysis_result_to_baseline(result)
+            except ValueError:
+                raise click.ClickException(
+                    "Could not evaluate the analysis result."
+                ) from None
+
         if comparison_baseline is not None:
             click.echo("Comparing with baseline...", err=True)
             try:
-                current_baseline = analysis_result_to_baseline(result)
+                assert current_baseline is not None
                 diff = compare_baselines(comparison_baseline, current_baseline)
             except IncompatibleComparisonError as error:
                 raise _ComparisonClickError(
@@ -479,7 +571,18 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 raise click.ClickException(
                     "Could not compare the analysis result."
                 ) from None
+
+        budget_evaluation = _evaluate_budget_policy(
+            policy=policy,
+            current_baseline=current_baseline,
+            comparison=diff,
+        )
+
+        if comparison_baseline is not None:
+            assert diff is not None
             if comparison_json:
+                if budget_evaluation is not None and not budget_evaluation.passed:
+                    _raise_budget_violation(budget_evaluation, json_output=True)
                 try:
                     click.echo(render_comparison_json(diff), nl=False)
                 except (TypeError, ValueError):
@@ -487,7 +590,14 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                         "Could not render comparison JSON."
                     ) from None
             else:
-                click.echo(render_diff_report(diff))
+                report = render_diff_report(diff)
+                if budget_evaluation is not None:
+                    report = "\n\n".join(
+                        (report, render_budget_report(budget_evaluation))
+                    )
+                click.echo(report)
+                if budget_evaluation is not None and not budget_evaluation.passed:
+                    _raise_budget_violation(budget_evaluation, json_output=False)
             return
 
         # JSON v1 remains a strict compatibility boundary.  In particular, do
@@ -495,6 +605,8 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         # with JSON: this keeps stdout, stderr, and failures identical to
         # --json alone.
         if json_output:
+            if budget_evaluation is not None and not budget_evaluation.passed:
+                _raise_budget_violation(budget_evaluation, json_output=True)
             if write_mode:
                 try:
                     payload = render_fresh_baseline(result)
@@ -550,12 +662,22 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             report = "\n\n".join(
                 (render_analysis_report(result, show_scripts=bin), *sections)
             )
+            if budget_evaluation is not None:
+                report = "\n\n".join((report, render_budget_report(budget_evaluation)))
+            if budget_evaluation is not None and not budget_evaluation.passed:
+                click.echo(report)
+                _raise_budget_violation(budget_evaluation, json_output=False)
             _write_fresh_baseline_if_requested(
                 write_baseline_path, result, overwrite_baseline
             )
             click.echo(report)
         else:
             report = render_analysis_report(result, show_scripts=bin)
+            if budget_evaluation is not None:
+                report = "\n\n".join((report, render_budget_report(budget_evaluation)))
+            if budget_evaluation is not None and not budget_evaluation.passed:
+                click.echo(report)
+                _raise_budget_violation(budget_evaluation, json_output=False)
             _write_fresh_baseline_if_requested(
                 write_baseline_path, result, overwrite_baseline
             )
@@ -576,6 +698,96 @@ def _write_fresh_baseline_if_requested(
         write_baseline(path, payload, overwrite=overwrite)
     except BaselineWriteError as error:
         raise _BaselineClickError(_baseline_write_failure_message(error)) from None
+
+
+def _validate_budget_prefix_options(  # noqa: PLR0913
+    *,
+    prefix: Path | None,
+    budget_config: Path | None,
+    max_total: int | None,
+    max_increase: int | None,
+    incomplete_policy: str | None,
+) -> None:
+    """Reject policy inputs for existing-prefix analysis before config I/O."""
+
+    if prefix is None:
+        return
+    for specified, option in (
+        (budget_config is not None, "--budget-config"),
+        (max_total is not None, "--max-total"),
+        (max_increase is not None, "--max-increase"),
+        (incomplete_policy is not None, "--incomplete-policy"),
+    ):
+        if specified:
+            raise click.UsageError(f"{option} cannot be used with --prefix.")
+
+
+def _load_effective_budget_policy(  # noqa: PLR0913
+    *,
+    budget_config: Path | None,
+    max_total: int | None,
+    max_increase: int | None,
+    incomplete_policy: str | None,
+) -> BudgetPolicy | None:
+    """Read one explicit source and apply only explicitly supplied CLI fields."""
+
+    try:
+        source_policy = (
+            None if budget_config is None else load_budget_policy(budget_config)
+        )
+    except (BudgetPolicySourceError, BudgetPolicyConfigError) as error:
+        raise _BaselineClickError(_budget_source_failure_message(error)) from None
+
+    cli_policy_specified = any(
+        value is not None for value in (max_total, max_increase, incomplete_policy)
+    )
+    if source_policy is None and not cli_policy_specified:
+        return None
+
+    base = BudgetPolicy() if source_policy is None else source_policy
+    try:
+        return BudgetPolicy(
+            max_total_logical_bytes=(
+                base.max_total_logical_bytes if max_total is None else max_total
+            ),
+            max_increase_logical_bytes=(
+                base.max_increase_logical_bytes
+                if max_increase is None
+                else max_increase
+            ),
+            incomplete_policy=(
+                base.incomplete_policy
+                if incomplete_policy is None
+                else IncompleteBudgetPolicy(incomplete_policy)
+            ),
+        )
+    except (TypeError, ValueError):
+        raise click.ClickException("Could not evaluate budget policy input.") from None
+
+
+def _evaluate_budget_policy(
+    *,
+    policy: BudgetPolicy | None,
+    current_baseline,
+    comparison,
+) -> BudgetEvaluation | None:
+    """Evaluate the effective policy after fresh analysis and comparison succeed."""
+
+    if policy is None:
+        return None
+    assert current_baseline is not None
+    try:
+        return evaluate_budget(current_baseline, policy, comparison=comparison)
+    except (BudgetEvaluationError, TypeError, ValueError):
+        raise click.ClickException("Could not evaluate size budget.") from None
+
+
+def _raise_budget_violation(evaluation: BudgetEvaluation, *, json_output: bool) -> None:
+    """Fail a completed policy decision without exposing new JSON contracts."""
+
+    if json_output:
+        click.echo(render_budget_report(evaluation), err=True)
+    raise _BudgetClickError("Size budget was exceeded.")
 
 
 def _validate_write_baseline_options(

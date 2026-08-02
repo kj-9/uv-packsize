@@ -500,6 +500,36 @@ def test_real_uv_local_wheel_comparison_json_is_complete_and_read_only(tmp_path)
     assert baseline.read_bytes() == before
 
 
+def test_real_uv_local_wheel_budget_config_enforces_without_machine_output(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        "[tool.uv-packsize.budget]\n"
+        "max_total_logical_bytes = 0\n"
+        "incomplete_policy = 'allow-partial'\n"
+    )
+    baseline = tmp_path / "baseline.json"
+
+    failed = _run_cli(tmp_path, wheelhouse, "--json", "--budget-config", str(config))
+    write_failed = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--json",
+        "--budget-config",
+        str(config),
+        "--write-baseline",
+        str(baseline),
+    )
+
+    assert failed.returncode == write_failed.returncode == 5
+    assert failed.stdout == write_failed.stdout == ""
+    assert "--- Size Budget ---" in failed.stderr
+    assert "Maximum total logical size exceeded" in failed.stderr
+    assert "Size budget was exceeded." in failed.stderr
+    assert not baseline.exists()
+
+
 def test_real_uv_install_from_local_wheels_json_text_options_are_byte_identical(
     tmp_path,
 ):

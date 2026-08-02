@@ -15,6 +15,12 @@ from click.testing import CliRunner
 from uv_packsize.analysis import AnalysisContextError, AnalysisContextErrorCode
 from uv_packsize.baseline import BaselineError, load_baseline
 from uv_packsize.baseline_write import BaselineWriteError
+from uv_packsize.budget import BudgetPolicy
+from uv_packsize.budget_config_source import (
+    BudgetPolicySourceError,
+    BudgetPolicySourceErrorReason,
+    BudgetPolicySourceSection,
+)
 from uv_packsize.cli import (
     UvCommandError,
     _command_failure_message,
@@ -339,7 +345,7 @@ def _mock_successful_uv_version(monkeypatch):
     )
 
 
-def _run_local_layout(  # noqa: PLR0913
+def _run_local_layout(  # noqa: PLR0912, PLR0913
     monkeypatch,
     installed_venv,
     package_names,
@@ -354,6 +360,10 @@ def _run_local_layout(  # noqa: PLR0913
     comparison_json=False,
     write_baseline=None,
     overwrite_baseline=False,
+    budget_config=None,
+    max_total=None,
+    max_increase=None,
+    incomplete_policy=None,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
@@ -406,7 +416,355 @@ def _run_local_layout(  # noqa: PLR0913
         arguments.extend(("--write-baseline", str(write_baseline)))
     if overwrite_baseline:
         arguments.append("--overwrite-baseline")
+    if budget_config is not None:
+        arguments.extend(("--budget-config", str(budget_config)))
+    if max_total is not None:
+        arguments.extend(("--max-total", str(max_total)))
+    if max_increase is not None:
+        arguments.extend(("--max-increase", str(max_increase)))
+    if incomplete_policy is not None:
+        arguments.extend(("--incomplete-policy", incomplete_policy))
     return CliRunner().invoke(cli, arguments)
+
+
+def test_cli_budget_help_guards_and_source_failures_precede_baseline_and_uv(
+    monkeypatch, tmp_path
+):
+    help_result = CliRunner().invoke(cli, ["--help"])
+    assert help_result.exit_code == 0
+    assert "--budget-config PATH" in help_result.output
+    assert "--max-total BYTES" in help_result.output
+    assert "--max-increase BYTES" in help_result.output
+    assert "--incomplete-policy [fail|allow-partial]" in help_result.output
+
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("baseline loader must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("uv discovery must not run")
+        ),
+    )
+    secret_config = tmp_path / "secret-policy.toml"
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_budget_policy",
+        lambda *_args: (_ for _ in ()).throw(
+            BudgetPolicySourceError(
+                BudgetPolicySourceErrorReason.INVALID_TOML,
+                BudgetPolicySourceSection.DOCUMENT,
+            )
+        ),
+    )
+    source_failure = CliRunner().invoke(
+        cli,
+        [
+            "--budget-config",
+            str(secret_config),
+            "--baseline",
+            "baseline.json",
+            "sample==1.0",
+        ],
+    )
+    assert source_failure.exit_code == 3
+    assert "code=invalid-toml, field=document" in source_failure.output
+    assert str(secret_config) not in source_failure.output
+
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_budget_policy",
+        lambda *_args: BudgetPolicy(max_increase_logical_bytes=1),
+    )
+    missing_baseline = CliRunner().invoke(
+        cli, ["--budget-config", "policy.toml", "sample==1.0"]
+    )
+    assert missing_baseline.exit_code == 2
+    assert "--max-increase requires --baseline." in missing_baseline.output
+
+    prefix_policy = CliRunner().invoke(
+        cli,
+        [
+            "--prefix",
+            "prefix",
+            "--site-packages",
+            "lib/site-packages",
+            "--case-rule",
+            "sensitive",
+            "--max-total",
+            "1",
+        ],
+    )
+    assert prefix_policy.exit_code == 2
+    assert "--max-total cannot be used with --prefix." in prefix_policy.output
+
+
+def test_cli_budget_applies_field_overrides_and_keeps_json_machine_output_empty_on_fail(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        "[tool.uv-packsize.budget]\n"
+        "max_total_logical_bytes = 999999\n"
+        "incomplete_policy = 'allow-partial'\n"
+    )
+
+    passed = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        budget_config=config,
+    )
+    assert passed.exit_code == 0
+    assert "--- Size Budget ---" in passed.stdout
+    assert "Incomplete-result policy: allow-partial." in passed.stdout
+
+    failed = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        budget_config=config,
+        max_total=0,
+    )
+    assert failed.exit_code == 5
+    assert failed.stdout == ""
+    assert "--- Size Budget ---" in failed.stderr
+    assert "Maximum total logical size exceeded" in failed.stderr
+    assert "Size budget was exceeded." in failed.stderr
+
+
+def test_cli_budget_config_keeps_unoverridden_fields(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    recorded = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert recorded.exit_code == 0
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(recorded.stdout)
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        "[tool.uv-packsize.budget]\n"
+        "max_total_logical_bytes = 0\n"
+        "max_increase_logical_bytes = 999999\n"
+        "incomplete_policy = 'allow-partial'\n"
+    )
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        budget_config=config,
+        max_total=999999,
+    )
+
+    assert result.exit_code == 0
+    assert "Maximum total logical size" in result.stdout
+    assert "Maximum logical-size increase" in result.stdout
+    assert "Incomplete-result policy: allow-partial." in result.stdout
+
+
+def test_cli_budget_pass_keeps_json_and_comparison_json_bytes_and_stderr(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    recorded = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert recorded.exit_code == 0
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(recorded.stdout)
+    monkeypatch.setattr(
+        "uv_packsize.cli.render_analysis_json", lambda *_args: '{"stable":true}\n'
+    )
+    plain_json = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    policy_json = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        incomplete_policy="fail",
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.render_comparison_json",
+        lambda *_args: '{"comparison":true}\n',
+    )
+    plain_comparison = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+    )
+    policy_comparison = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+        incomplete_policy="fail",
+    )
+
+    assert plain_json.exit_code == policy_json.exit_code == 0
+    assert plain_json.stdout == policy_json.stdout
+    assert plain_json.stderr == policy_json.stderr
+    assert plain_comparison.exit_code == policy_comparison.exit_code == 0
+    assert plain_comparison.stdout == policy_comparison.stdout
+    assert plain_comparison.stderr == policy_comparison.stderr
+
+
+def test_cli_budget_text_violation_follows_primary_report(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], max_total=0
+    )
+
+    assert result.exit_code == 5
+    assert result.stdout.index("--- Package Sizes ---") < result.stdout.index(
+        "--- Size Budget ---"
+    )
+    assert "Result: FAIL" in result.stdout
+    assert "Error: Size budget was exceeded." in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--budget-config", "policy.toml"),
+        ("--max-total", "1"),
+        ("--max-increase", "1"),
+        ("--incomplete-policy", "fail"),
+    ],
+)
+def test_cli_prefix_rejects_every_budget_input_before_external_work(
+    monkeypatch, option, value
+):
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("external work must not run")
+
+    monkeypatch.setattr("uv_packsize.cli.load_budget_policy", unavailable)
+    monkeypatch.setattr("uv_packsize.cli.discover_existing_prefix", unavailable)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--prefix",
+            "prefix",
+            "--site-packages",
+            "lib/site-packages",
+            "--case-rule",
+            "sensitive",
+            option,
+            value,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert f"{option} cannot be used with --prefix." in result.output
+
+
+def test_cli_budget_noop_and_incomplete_policy_contract(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(
+        venv_path=venv_path,
+        site_packages=site_packages,
+        name="sample",
+        missing_file=True,
+    )
+
+    no_op = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        incomplete_policy="allow-partial",
+    )
+    assert no_op.exit_code == 0
+    assert "No limits configured; this is a no-op policy." in no_op.stdout
+    assert "Completeness is not evaluated by a no-op policy." in no_op.stdout
+
+    incomplete_failure = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        max_total=999999,
+    )
+    assert incomplete_failure.exit_code == 5
+    assert "Result: FAIL" in incomplete_failure.stdout
+    assert "Incomplete measurement is not allowed" in incomplete_failure.stdout
+
+    allow_partial = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        max_total=999999,
+        incomplete_policy="allow-partial",
+    )
+    assert allow_partial.exit_code == 0
+    assert "Result: PASS" in allow_partial.stdout
+    assert "Current measurement completeness: incomplete." in allow_partial.stdout
+
+
+def test_cli_budget_violation_prevents_baseline_publication(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    target = tmp_path / "baseline.json"
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        write_baseline=target,
+        max_total=0,
+    )
+
+    assert result.exit_code == 5
+    assert result.stdout == ""
+    assert not target.exists()
+    assert "--- Size Budget ---" in result.stderr
+
+
+def test_cli_budget_max_increase_requires_and_uses_a_compatible_baseline(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    source = _add_distribution(
+        venv_path=venv_path, site_packages=site_packages, name="sample"
+    )
+    recorded = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert recorded.exit_code == 0
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(recorded.stdout)
+    source.write_bytes(b"x" * 4096)
+
+    failed = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+        max_increase=0,
+    )
+
+    assert failed.exit_code == 5
+    assert failed.stdout == ""
+    assert "Observed canonical global logical-size increase" in failed.stderr
+    assert "Maximum logical-size increase exceeded" in failed.stderr
 
 
 def test_cli_write_baseline_help_and_guards_precede_external_work(monkeypatch):
