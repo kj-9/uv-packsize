@@ -213,9 +213,9 @@ distributionごとの合計だけではなく、ファイル単位で次を保�
 
 任意のrequirementsをインストールするモードでは、インストール済みCore Metadataの`Requires-Dist`とenvironment markersからグラフを構築する。
 
-uvプロジェクトやlockfileを分析するモードでは、[`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)のJSONを候補とする。ただし、P5-01で確認した`uv 0.11.3`の出力は`schema.version: "preview"`であり、CLI helpも出力が安定していないと明記している。この値は互換性を表すversionではないため、通常のCLI、baseline、CI比較の入力としてはまだ採用しない。
+uvプロジェクトやlockfileを分析するモードでは、明示された`--project`と`--lockfile`だけを読む限定的な直接`uv.lock` readerを用いる。readerは、このプロジェクトが検証したlock formatの`version`/`revision`組合せと、その用途に必要な閉じたfield subsetだけをallowlistで受ける。未知・欠損・不正なschema、未知の必須semantic、曖昧なpackage/selectionは推測やpartial graphへのfallbackをせず拒否する。readerはworkspace metadataを起動・入力・補完に使わず、raw TOML、path、source URL、credential、opaque IDを公開result、baseline、利用者向けdiagnosticへ出力しない。
 
-将来のadapterは、上流がnumericかつ安定と宣言したschema versionを出力し、そのversionをこのプロジェクトが明示的に支持してから追加する。previewの間に実験する場合も、`uv` executableの完全一致version、`schema.version == "preview"`、必要なtop-level fieldとnode fieldの型をすべて検査する隔離されたopt-inに限る。node ID、workspace/member path、source URLはローカルpathやcredentialを含み得るためopaqueな入力とし、公開result、baseline、利用者向けdiagnosticへ出力しない。
+[`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)は別の将来adapter候補として隔離する。P5-01で確認した`uv 0.11.3`の`schema.version: "preview"`は通常CLI、baseline、CI比較の入力として常に非対応である。将来追加する場合も、上流がnumericかつstableと宣言したschema versionを出力し、このプロジェクトが明示的に支持してからに限る。
 
 ### Policy
 
@@ -334,7 +334,7 @@ Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b�
 実施項目:
 
 - `pyproject.toml`、`uv.lock`、dependency groupsを入力として扱う。
-- stableかつversionedなschemaが利用可能になった後だけ、`uv workspace metadata`からlock graphを取得する。`schema.version: "preview"`だけの出力はP5-01で非対応と固定した。
+- 明示された`--project`/`--lockfile`から、allowlistした`uv.lock` schemaだけを直接読む。未知schemaは拒否し、`uv workspace metadata`は使わない。`schema.version: "preview"`だけの出力はP5-01で非対応と固定した。
 - package version、extras、Python version、platform間を比較する。
 - installed logical sizeとcompressed wheel sizeを並べる。
 - Linux wheelをmacOSやWindows上で分析するwheel-onlyモードを追加する。

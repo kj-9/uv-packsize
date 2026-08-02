@@ -10,11 +10,11 @@
 |---|---|
 | 現在のPhase | Phase 5: project/lockと比較分析（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P5-03b: stableな上流schemaだけを読むproject/lock metadata adapterを実装する（blocked） |
+| 次のタスク | P5-03b: explicit `--project`/`--lockfile`の限定的な直接`uv.lock` readerを実装する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
-| Blocker | P5-03b/P5-03c: numericかつstableな上流metadata schema待ち |
-| 次の成果物 | stableな上流metadata schemaの提供待ち |
+| Blocker | P5-03c: explicit project/lockをtemporary installへ安全に適用する`uv`の公開・検証可能な経路待ち。P5-03bは開始可能 |
+| 次の成果物 | allowlistした`uv.lock` schemaを読む限定 readerとnetwork-free fixture |
 
 ## ステータス定義
 
@@ -940,14 +940,14 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - project/lock analysisは、既存のpositional requirementsによる`fresh-install`、観測専用の`existing-prefix`とは別のinput familyである。将来公開するanalysis JSONは新しい`analysis-result-v3`だけで`context.input_kind: "project-lock"`を表し、v1/v2のfield、意味、bytesを変更しない。v3のcontextは少なくとも`root_package`（PEP 503 normalized name）、`workspace_member`（選択されなければ`null`）、`dependency_group_selection`（`none` / `explicit` / `all`）、実効`dependency_groups`、実効`extras`、解決済み`python_version`、`platform`、`architecture`、`path_flavor`、`case_rule`、`uv_version`、`build_policy`、`compile_bytecode`、`resolution_strategy`、`lock_identity`を持つ。`workspace_member`を選ぶ場合は`root_package == workspace_member`とする。root projectを選ぶ場合は`workspace_member: null`とする。group/extrasは名前をPEP 503正規化してset semanticsで昇順にし、group modeだけではなく実際に有効だったgroup集合も保存する。これにより`--all-groups`の後日のworkspace変化を同じ入力と誤認しない。
 - `lock_identity`は、読み取ったlock bytesの`sha256`を`uv-packsize/project-lock/v1\\0lock\\0`でdomain separationした64桁hex fingerprintとする。mtime、size、absolute/relative path、workspace root、lock node ID、source URLはidentityに含めず、公開しない。fingerprintは内容を復元しないが、同一lockの相関は可能であるため比較JSONと同じく共有時に相関情報になることをREADMEで明記する。manifest/lockのraw bytes、TOML値、source/index URL、credential、environment variable、uv diagnostic、member path、opaque node IDをanalysis result、baseline、comparison JSON、text report、error messageへ出力しない。
 - project modeのpublic contextは、resolverが何を選んだかではなく、選択と測定条件を記録する。`root_package`、member、group mode/effective groups、extras、Python/platform/path semantics、uv version、build/bytecode policy、resolution strategyはcomparison compatibilityの対象とする。一方、`lock_identity`とresolved distributionsは比較対象の変化そのものであり、互換性fingerprintから除外する。したがって、同じproject selection/target条件でlock更新により依存versionやsizeが変わったbaselineは比較でき、lock fingerprintの相違は将来のcomparison JSON v2で値を出さない`lock_changed: bool`としてだけ示す。resolver source条件を安全に比較できるstableなsymbolic aliasが上流schemaまたは明示CLIから得られるまでは、project modeは未知のsource semanticsを受理しない。将来追加するaliasは既存`index_identifiers`と同じASCII symbolic alias制約を持ち、compatibility対象へ加える。
-- project/lock modeのCLI入力はambient current directoryや`UV_PROJECT`等から推測しない。将来の成功経路は`--project PYPROJECT --lockfile UV_LOCK`をともに必須とし、任意の`--workspace-member NAME`、repeatable `--group NAME`または`--all-groups`、repeatable `--extra NAME`、既存の明示`--python`、明示target platform optionを受ける。`--group`と`--all-groups`は排他であり、どちらもない場合の実効groupsは空集合で`dependency_group_selection: "none"`とする。`--workspace-member`、group、extraはsafe identifierの構文を先に検証し、project上の存在/有効性は安定metadataで検証する。memberはpathで指定しない。`--locked`相当はproject modeの必須内部policyであり、lock更新・解決の暗黙fallbackを設けない。
+- project/lock modeのCLI入力はambient current directoryや`UV_PROJECT`等から推測しない。将来の成功経路は`--project PYPROJECT --lockfile UV_LOCK`をともに必須とし、任意の`--workspace-member NAME`、repeatable `--group NAME`または`--all-groups`、repeatable `--extra NAME`、既存の明示`--python`、明示target platform optionを受ける。`--group`と`--all-groups`は排他であり、どちらもない場合の実効groupsは空集合で`dependency_group_selection: "none"`とする。`--workspace-member`、group、extraはsafe identifierの構文を先に検証し、project上の存在/有効性はallowlistした直接`uv.lock` readerで検証する。memberはpathで指定しない。`--locked`相当はproject modeの必須内部policyであり、lock更新・解決の暗黙fallbackを設けない。
 - project modeはpositional requirementsと`--prefix`に排他とする。fresh analysisと同じ測定policyを使うため`--allow-build`、`--python`、target platform、text analysis optionsはその意味を維持する。baseline read/write、comparison JSON、budgetはproject-lock schemaと互換なbaselineに限り許可する。requirements v1 baseline、existing-prefix v2 baseline、project-lock v3 baselineのcross-kind比較はしない。`--comparison-json`はproject-lock比較用の新しいclosed schema v2のみを使い、既存`comparison-result-v1`はbyte不変とする。
-- future readerは明示pathをregular fileとして安全に一度読む。symlink、special file、open前後identity race、size/encoding/TOML/lock format errorは、raw pathやcontentを含めないtyped `project-input-*` failureへ正規化する。stable上流metadataのversion/shape/必須semanticがunknown、不足、不正なら、partial graph、member-path推測、preview parser、raw TOML/lock fallbackを使わず`unsupported-project-metadata`として失敗する。P5-01の`schema.version: "preview"`は常にこのunknown側であり、adapterの試行対象外である。
+- direct readerは明示pathをregular fileとして安全に一度読む。symlink、special file、open前後identity race、size/encoding/TOML/lock format errorは、raw pathやcontentを含めないtyped `project-input-*` failureへ正規化する。allowlist外の`uv.lock` `version`/`revision`、required fieldの欠損・型不正、unknown required semantic、曖昧なpackage/selectionは、partial graph、member-path推測、raw TOML/lock fallbackを使わず`unsupported-project-lock`として失敗する。readerは`uv workspace metadata`を起動も入力もせず、P5-01の`schema.version: "preview"`は常に試行対象外である。
 
 exit / stdout contract:
 
 - optionの不足・構文不正・排他違反はfilesystem/uvを呼ばずexit 2、stdout空とする。対象は`--project`/`--lockfile`の片方だけ、project modeとpositional requirements/`--prefix`の組合せ、`--group`と`--all-groups`、unsafe member/group/extra/platform selector、comparison/write optionの既存排他である。
-- 明示project/lock inputの安全読込、parse、選択検証、stable metadata compatibilityの失敗はexit 3、stdout空、固定code/fieldだけをstderrへ出す。存在しないmember/group/extra、unknown required source semantic、preview metadataもこの区分に含める。`uv --locked`の実行、target environment作成、wheel install、inventoryの失敗は既存どおりexit 1で、diagnosticをsanitizeする。stale lockは`--locked`実行失敗としてexit 1にする。
+- 明示project/lock inputの安全読込、parse、選択検証、allowlist外または未知semanticなlock schemaの失敗はexit 3、stdout空、固定code/fieldだけをstderrへ出す。存在しないmember/group/extra、unknown required source semanticもこの区分に含める。`uv workspace metadata`は実行しない。`uv --locked`の実行、target environment作成、wheel install、inventoryの失敗は既存どおりexit 1で、diagnosticをsanitizeする。stale lockは`--locked`実行失敗としてexit 1にする。
 - project-lock baselineのinput-kindまたはcomparison compatibility coreが異なる場合はexit 4、stdout空、既存同様の安全なreason identifierだけをstderrへ出す。lock identityだけの差はexit 4にせず、完了比較（incompleteならpartial）としてexit 0にする。budget violationは既存exit 5を維持する。成功時だけtext report、analysis JSON v3、comparison JSON v2のいずれか一つをstdoutへ出し、progressはstderrへ出す。
 
 実装順序と前提:
@@ -955,12 +955,18 @@ exit / stdout contract:
 | ID | 状態 | 依存 | 最小対象 | 完了条件 |
 |---|---|---|---|---|
 | P5-03a | `todo` | P5-02 | `models.py`、pure JSON renderer、schema v3、baseline parser/projection、diff/comparison JSON v2、unit/golden tests | adapter/CLIなしで`ProjectLockContext`、safe label/fingerprint validation、effective selection、v3 closed schema、v3 baseline read/write、compatibility coreと`lock_changed`をpureに固定する。v1/v2 analysisとcomparison v1をbyte不変にする。 |
-| P5-03b | `blocked` | P5-03a、上流のnumericかつstableなmetadata schema | isolated project/lock reader + adapter、network-free fixtures | P5-01のallowlist条件を満たす上流schemaだけをparseし、explicit project/lock reader、selection validation、domain-separated lock identity、unknown semanticのsafe rejectionを実装する。preview output、real network、CLIは含めない。 |
-| P5-03c | `blocked` | P5-03b | installer bridge、CLI、README、local-wheel E2E | `--project`/`--lockfile`のguards、`--locked` execution、fresh install/inventory、baseline/write/budget/comparisonのpublic contractを接続する。stdout/exit 0--5、redaction、cross-kind rejection、lock-change comparisonをlocal fixturesで検証する。 |
+| P5-03b | `todo` | P5-03a | isolated explicit project/lock reader、network-free fixtures | `uv workspace metadata`を使わず、explicit native `--project`/`--lockfile`を安全に一度だけ読み、`uv.lock` `version = 1`かつ`revision = 3`と閉じたrequired field subsetだけをparseする。project root/member/group/extra selection、domain-separated lock identity、unknown schema/semantic・曖昧なselectionのsafe rejectionを実装する。raw path/content/source URL/credential/opaque IDをdomain errorへ持ち込まない。CLI、`uv`実行、real networkは含めない。 |
+| P5-03c | `blocked` | P5-03b、`uv`がexplicit project/lockをtemporary installへ安全かつ再現可能に適用できる公開契約 | installer bridge、CLI、README、local-wheel E2E | readerが返す検証済み選択だけを`--project`/`--lockfile` guards、locked fresh temporary install/inventory、baseline/write/budget/comparisonのpublic contractへ接続する。projectまたはlockを更新せず、workspace metadataを起動せず、stdout/exit 0--5、redaction、cross-kind rejection、lock-change comparisonをlocal fixturesで検証する。 |
 
-P5-03b/P5-03cのblocker:
+P5-03b/P5-03cのschema・fixture方針:
 
-- 上流がnumericかつstableと宣言する`uv workspace metadata`（または同等のmachine-readable lock graph）schemaを提供し、P5-01のallowlist/shape validationを満たすこと。`preview`のままならP5-03a以外を開始しない。
+- P5-03bのproduction readerは、`uv.lock` `version = 1`かつ`revision = 3`と、テストで固定した閉じたfield subsetだけを受ける。新しいversion/revision、unknown fieldが意味に必要なsource/marker/dependency表現、duplicateまたは曖昧なpackage/selectionは、互換と推測せずexit 3のsafe typed failureへ正規化する。対応を広げる変更は、fixture・parser・公開compatibility判断を同じ変更単位で追加する。
+- fixtureはnetwork不要の最小`pyproject.toml`/`uv.lock`組をrepository内に保持し、accepted v1/revision3、unknown version/revision、required field欠損・型不正、unknown semantic、duplicate/ambiguous selection、unsafe file/read race、raw値のredactionをunitで固定する。P5-03cを開始できる場合のE2Eはlocal wheelsと`--find-links`だけを使い、明示project/lockのread-only性、locked input failure、schema v1/v2/comparison v1 byte不変、v3/v2のproject-lock contractを検証する。
+- `uv workspace metadata`はP5-03b/P5-03cで起動・parse・fixture化しない。P5-01で拒否した`schema.version: "preview"`は、上流が将来stable schemaを提供してもこの直接readerの互換範囲を自動的に変えない。
+
+P5-03cのblocker:
+
+- direct readerのv1/revision3対応だけでは、explicit project/lockを既存projectへ書き込まずtemporary installationへ再現可能に適用する`uv`の公開契約が確立していない。P5-03cは、その契約とlocal-wheelで検証可能な実行経路を確認してから開始する。`uv workspace metadata`のstable schema提供はこのblockerの解消条件ではない。
 
 検証:
 
@@ -992,7 +998,17 @@ P5-03b/P5-03cのblocker:
 
 次のタスク:
 
-- P5-03bはblocked。P5-01で固定したとおり、numericかつstableと宣言された上流metadata schemaが提供されるまでadapter、project input reader、CLI接続を開始しない。
+- P5-03b: explicit `--project`/`--lockfile`だけを読む、`uv.lock` v1/revision3限定の直接readerを実装する。P5-01で拒否した`uv workspace metadata`のpreview outputは使わず、未知`uv.lock` schemaは安全側で拒否する。
+
+### 2026-08-02: P5 direct `uv.lock` readerへの再計画
+
+状態: `done`
+
+設計判断:
+
+- P5-03bの上流stable metadata schema待ちは解除し、P5-02で固定したexplicit `--project`/`--lockfile` input contractに限定した直接`uv.lock` readerへ置き換える。P5-03aの`ProjectLockContext`、analysis JSON v3、baseline/comparison JSON v2、compatibility coreと`lock_changed`のpure contractは変更しない。
+- readerは`uv.lock` format全体の汎用実装ではない。`version = 1`かつ`revision = 3`と、root/member/group/extra selectionに必要なfield subsetだけを明示allowlistし、未知schema、未知の必須semantic、曖昧なselectionを受理しない。未対応入力を新しい互換入力と見なしたり、raw TOMLから補完したりしない。
+- P5-03bは明示inputのread-only readerまでを扱う`todo`とする。installer/CLI接続のP5-03cは、既存projectを変更せずtemporary installationへlockを適用する`uv`の公開・検証可能な経路が未確立なため`blocked`を維持する。どちらも`uv workspace metadata`を起動・parse・fixture化しない。
 
 ### 2026-08-02: P4-04f CLI policy input/precedence implementation
 
