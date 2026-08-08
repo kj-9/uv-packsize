@@ -215,6 +215,12 @@ distributionごとの合計だけではなく、ファイル単位で次を保�
 
 uvプロジェクトやlockfileを分析するモードでは、明示された`--project`と`--lockfile`だけを読む限定的な直接`uv.lock` readerを用いる。readerは、このプロジェクトが検証したlock formatの`version`/`revision`組合せと、その用途に必要な閉じたfield subsetだけをallowlistで受ける。PEP 621の非selection project field、標準`[build-system]`/`[tool]` table、v1/revision 3のlock contextとartifact recordは、既知のtable/field shapeを検証してから無視する。ただし`[tool.uv]`の`default-groups`は暗黙のdependency group選択を変えるため、readerの明示selectionと混同せず安全に拒否する。他の`tool.uv`設定を一般的に拒否して互換範囲を恣意的に狭めない。一方、root name、dependency group、extra、dynamic extra、root metadataのgroup/extra整合などselectionへ影響するsemanticは明示的に検証し、未知・欠損・不正なschema、未知の必須semantic、曖昧なpackage/selectionは推測やpartial graphへのfallbackをせず拒否する。入力fileはleafだけでなく全parent componentのsymlinkを拒否し、bounded readの前後でdevice/inode/mode/size/mtime/ctimeを再照合する。ただし、同一descriptor上の内容をimmutable snapshotにするものではないため、入力は安定したtrusted directoryに置く。readerはworkspace metadataを起動・入力・補完に使わず、raw TOML、path、source URL、credential、opaque IDを公開result、baseline、利用者向けdiagnosticへ出力しない。
 
+project/lockのinstall adapterは、readerが一度の安全読込で検証したproject/lock bytesをprivate snapshotとして受け取り、標準名`pyproject.toml`と`uv.lock`でunique temporary staging directoryへだけ配置する。そこで`UV_PROJECT_ENVIRONMENT`を別のunique absolute temporary prefixに設定し、`uv sync --project <staged pyproject> --locked --no-install-project --no-default-groups`に、検証済みselection由来の`--group`/`--all-groups`と`--extra`だけを追加して実行する。`--lockfile`は使わず、隣接する標準名lock fileを`uv`へ解決させる。`--frozen`はlock freshnessを検査しないので使わない。original inputの再読・更新、ambient project discovery、workspace metadataは行わない。
+
+staged rootのlocal editable installは`--no-install-project`により行わない。local rootのサイズはlockだけから再現できず、build codeを実行し得るため、初期project/lock modeでは未測定かつ明示的な対象外とする。local path/VCS/workspace sourceを持つrootまたはdependencyはsupported subset外として拒否する。defaultのwheel-only policyは`uv sync`でも維持し、source buildは`--allow-build`の明示opt-inだけで許可する。
+
+`uv sync`はstale lockなどの失敗後にもtarget prefixの骨組みを残し得る。そのためstaging directoryとtemporary prefixは成功、installer/inventory failure、例外のすべてでfinally cleanupする。cleanupはユーザー指定inputや既存prefixを対象にせず、失敗時もraw path、command、`uv` diagnosticを利用者向けoutputへ出さない。
+
 [`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)は別の将来adapter候補として隔離する。P5-01で確認した`uv 0.11.3`の`schema.version: "preview"`は通常CLI、baseline、CI比較の入力として常に非対応である。将来追加する場合も、上流がnumericかつstableと宣言したschema versionを出力し、このプロジェクトが明示的に支持してからに限る。
 
 ### Policy
@@ -335,6 +341,8 @@ Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b�
 
 - `pyproject.toml`、`uv.lock`、dependency groupsを入力として扱う。
 - 明示された`--project`/`--lockfile`から、allowlistした`uv.lock` schemaだけを直接読む。未知schemaは拒否し、`uv workspace metadata`は使わない。`schema.version: "preview"`だけの出力はP5-01で非対応と固定した。
+- 検証済みsnapshotをtemporary staging経由で`uv sync --locked --no-install-project`へ適用し、元のproject/lockを変更せずtemporary prefixを測定する。stale lockを含む失敗後もtemporary staging/prefixをcleanupする。
+- 初期project/lock modeではlocal root packageをinstall・測定せず、lockだけで再現不能またはbuild code実行につながるlocal sourceを拒否する。
 - package version、extras、Python version、platform間を比較する。
 - installed logical sizeとcompressed wheel sizeを並べる。
 - Linux wheelをmacOSやWindows上で分析するwheel-onlyモードを追加する。
@@ -344,6 +352,7 @@ Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b�
 
 - 実際のuvプロジェクトについて、現在のlockと変更後のlockを比較できる。
 - platform固有wheelを混同せず、測定contextを結果から再構築できる。
+- original project/lockを変更せず、offline local-wheel fixtureでlocked install、selection、cleanup、sanitized failureを再現できる。
 
 ### Phase 6: エコシステム連携（必要性を確認後）
 
