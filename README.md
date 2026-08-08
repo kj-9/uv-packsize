@@ -419,6 +419,72 @@ uv-packsize -p 3.12 --budget-config pyproject.toml \
   --baseline .ci/uv-packsize-baseline.json 'your-package==1.2.3'
 ```
 
+### GitHub Actions: locked project comparison
+
+For a locked project, commit a reviewed baseline (for example,
+`.ci/uv-packsize-baseline.json`) and the optional budget table in
+`pyproject.toml`. Copy this workflow to your repository as
+`.github/workflows/dependency-footprint.yml`:
+
+```yaml
+name: Dependency footprint
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-footprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.3"
+      - name: Compare locked dependency footprint
+        shell: bash
+        run: |
+          temporary_directory="$(mktemp -d)"
+          trap 'rm -rf "$temporary_directory"' EXIT
+          comparison_json="$temporary_directory/comparison.json"
+          uvx --from uv-packsize uv-packsize --project pyproject.toml --lockfile uv.lock --baseline .ci/uv-packsize-baseline.json --budget-config pyproject.toml --comparison-json > "$comparison_json"
+          python - "$comparison_json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as comparison_file:
+              comparison = json.load(comparison_file)
+
+          baseline_total = comparison["baseline"]["totals"]["global_logical_bytes"]
+          current_total = comparison["current"]["totals"]["global_logical_bytes"]
+          global_delta = comparison["changes"]["totals"]["global_logical_bytes_delta"]
+          print("## Dependency footprint")
+          print()
+          print(f"- Input kind: `{comparison['context']['input_kind']}`")
+          print(f"- Lock changed: `{comparison['context']['lock_changed']}`")
+          print(f"- Baseline total: {baseline_total} bytes")
+          print(f"- Current total: {current_total} bytes")
+          print(f"- Change: {global_delta:+d} bytes")
+          PY
+```
+
+This is deliberately a read-only check: it uses least-privilege
+`contents: read`, analyzes only the explicit project and lock file, and never
+creates or updates a baseline. The comparison JSON is kept in a private
+temporary directory and deleted at job exit. The job summary emits only fixed
+schema fields (input kind, whether the lock changed, and global byte totals);
+it does not publish the JSON, local paths, requirements, or lock contents.
+
+The workflow is safe to run for ordinary push and fork pull-request events
+because it needs no secrets, write permissions, PR-comment integration, or
+automatic baseline update. Keep the baseline reviewable in the repository (or
+otherwise supply it explicitly) and make any baseline refresh a separate,
+reviewed change.
+
 ### Dependency explanations
 
 Pass `--explain` with text output to append requested-root status, dependency

@@ -8,13 +8,14 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 5: project/lockと比較分析（`done`） |
+| 現在のPhase | Phase 6: エコシステム連携（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P6-01: 上流連携の費用対効果を再評価する |
+| 次のタスク | P6-03: provenance要件を上流issue草案として整理する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
-| 次の成果物 | Phase 6の上流連携候補を再評価する |
+| Phase 6進捗 | 2 / 3 完了 |
+| 次の成果物 | provenance要件の上流issue草案 |
 
 ## ステータス定義
 
@@ -252,7 +253,9 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P5-03c1 | Phase 5 | validated project/lock snapshotをtemporary stagingと`uv sync`へ接続するinstaller bridgeを実装する | `done` |
 | P5-03c2 | Phase 5 | project/lock CLI option、exit/stdout boundary、baseline/comparison/budget接続を実装する | `done` |
 | P5-03c3 | Phase 5 | local-wheel E2E、README、全体回帰でproject/lock公開契約を完了する | `done` |
-| P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
+| P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `done` |
+| P6-02 | Phase 6 | 既存CLIを使う最小GitHub Actions workflow契約を公開する | `done` |
+| P6-03 | Phase 6 | provenance要件を上流issue草案として整理する | `todo` |
 
 ### P2-01: AnalysisResultとfile inventoryのデータモデル設計
 
@@ -1187,6 +1190,27 @@ P5-03c全体のDefinition of Done:
 次のタスク:
 
 - P5-03c3でoffline local-wheel E2E、README、全体検証を実施して公開契約を完了する。
+
+### 2026-08-08: P6-02 最小GitHub Actions workflow契約
+
+状態: `done`
+
+実装:
+
+- READMEに、既存CLIのproject/lock modeだけを使うコピー可能なGitHub Actions workflowを追加した。workflowは`contents: read`だけを要求し、`--project pyproject.toml --lockfile uv.lock`、review済みbaseline、`--budget-config pyproject.toml`、`--comparison-json`を明示する。
+- comparison JSONは`mktemp -d`で作るprivate temporary directoryだけへ出力し、job exit時にcleanupする。`GITHUB_STEP_SUMMARY`へはinput kind、lock changed、global baseline/current/delta bytesという固定schema fieldだけを出力し、JSON全体、path、requirements、lock contentsを公開しない。
+- custom Action、PR comment、secret、write permission、baseline自動作成/更新は採用しない。fork pull requestを含む通常のpush/PR eventでread-onlyに実行でき、baseline refreshは別のreview済み変更として行う。
+- workflow fixtureとREADMEがbyte-for-byteで一致すること、least privilege、明示input、private comparison JSON、固定summary field、baseline write/comment integrationの不在をnetwork不要のtestで固定した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p6-02-cache uv run --locked pytest tests/test_ci_workflow_example.py -q` — 成功（4 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p6-02-cache make ci-check` — 成功（Ruff format/lint、ty、README cog整合性）。
+- `git diff --check` — 成功。
+
+次のタスク:
+
+- P6-03でprovenance要件を上流issue草案として整理する。issue作成はユーザーの明示承認を得るまで行わない。
 
 ### 2026-08-08: P5-03c3 offline project/lock E2E, documentation, and verification
 

@@ -364,6 +364,12 @@ Phase 4の残作業は、domain policy（P4-04a）、pure presentation（P4-04b�
 - `uv tree --show-sizes`へのinstalled-size追加提案
 - 標準化可能なJSON schemaや測定契約の公開
 
+Phase 6では、既存CLIの再利用より大きい価値が確認できるまで、custom
+GitHub Action、PR comment、baselineの自動更新を追加しない。まずはexplicit
+project/lock、read-only baseline、budget、comparison JSONを使う最小workflowを
+公開し、job summaryにはsafeな固定fieldだけを出す。この形ならfork PRやsecretsを
+必要とせず、baseline更新はreview可能な別変更として保てる。
+
 ## 7. 当面実装しないもの
 
 次は、測定の信頼性とCI利用が確立するまで優先しない。
