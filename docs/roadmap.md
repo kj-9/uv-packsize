@@ -370,6 +370,12 @@ project/lock、read-only baseline、budget、comparison JSONを使う最小workf
 公開し、job summaryにはsafeな固定fieldだけを出す。この形ならfork PRやsecretsを
 必要とせず、baseline更新はreview可能な別変更として保てる。
 
+`uv workspace metadata` はpreviewかつschemaが安定していないため、通常CLI、
+baseline、CI比較の入力にはしない。実際にsource buildされたdistributionの
+provenanceなど、現在の公開出力だけでは安全に確定できない情報は推測しない。
+必要な上流機能は、提出前にローカルのissue草案として要件・安全境界・非目標を
+整理し、GitHubへの投稿は明示承認を得てから行う。
+
 ## 7. 当面実装しないもの
 
 次は、測定の信頼性とCI利用が確立するまで優先しない。

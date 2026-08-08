@@ -8,14 +8,14 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 6: エコシステム連携（`in_progress`） |
+| 現在のPhase | Phase 6: エコシステム連携（`done`） |
 | `in_progress` | なし |
-| 次のタスク | P6-03: provenance要件を上流issue草案として整理する |
+| 次のタスク | なし（Phase 7はロードマップに未定義のため、再計画待ち） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
-| Phase 6進捗 | 2 / 3 完了 |
-| 次の成果物 | provenance要件の上流issue草案 |
+| Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
+| 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
 
 ## ステータス定義
 
@@ -71,7 +71,7 @@ release関連タスクでは、これにbuildとartifact検証を追加する。
 | Phase 3 | サイズの理由を説明する | `done` |
 | Phase 4 | CIでの継続管理 | `done` |
 | Phase 5 | project/lockと比較分析 | `done` |
-| Phase 6 | エコシステム連携 | `todo` |
+| Phase 6 | エコシステム連携 | `done` |
 
 詳細な目的と判断背景は[`roadmap.md`](./roadmap.md)を参照する。
 
@@ -255,7 +255,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P5-03c3 | Phase 5 | local-wheel E2E、README、全体回帰でproject/lock公開契約を完了する | `done` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `done` |
 | P6-02 | Phase 6 | 既存CLIを使う最小GitHub Actions workflow契約を公開する | `done` |
-| P6-03 | Phase 6 | provenance要件を上流issue草案として整理する | `todo` |
+| P6-03 | Phase 6 | provenance要件を上流issue草案として整理する | `done` |
 
 ### P2-01: AnalysisResultとfile inventoryのデータモデル設計
 
@@ -1211,6 +1211,26 @@ P5-03c全体のDefinition of Done:
 次のタスク:
 
 - P6-03でprovenance要件を上流issue草案として整理する。issue作成はユーザーの明示承認を得るまで行わない。
+
+### 2026-08-08: P6-03 provenance要件の上流Issue草案
+
+状態: `done`
+
+実装:
+
+- [`uv-provenance-upstream-issue-draft.md`](./uv-provenance-upstream-issue-draft.md)に、上流へ提出するための日本語の論点整理と英語本文draftを追加した。GitHub上のIssue検索、作成、更新、投稿は実施していない。
+- 草案は、preview / unstableな`uv workspace metadata`を通常CLI・baseline・CI比較の入力にしない現行境界と、diagnostic・cache・filesystem副作用からbuild実績を推測しない方針を記録した。numeric stable schema、公開JSON Schema/versioning、root/member/group/extra selection、marker/conflict guidance、selected artifactとcandidateの分離、per-run build outcome/provenance、redacted machine-readable diagnostics、stable locked semanticsを上流要件として明確化した。
+- path、source URL、opaque ID、credential、任意のuntrusted metadataを公開identityまたはdiagnosticへ反射しない要件を明記し、`uv tree --show-sizes`のinstalled-size化、custom Action、`pydistcheck` API integrationを非目標として分離した。
+- 調査根拠として、公式の[workspace metadata internals](https://docs.astral.sh/uv/reference/internals/metadata/)と[lockfile versioning](https://docs.astral.sh/uv/concepts/resolution/#lockfile-versioning)を草案にリンクした。stable featureが上流で提供・対応versionが確定するまで、F-007は未解決とする。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p6-03-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `git diff --check` — 成功。
+
+次のタスク:
+
+- なし。Phase 6は3 / 3を完了した。Phase 7はロードマップに未定義であり、次の実装範囲は再計画で決定する。上流Issueの作成・更新・投稿はユーザーの明示承認後にだけ行う。
 
 ### 2026-08-08: P5-03c3 offline project/lock E2E, documentation, and verification
 
@@ -2527,6 +2547,6 @@ uv run --locked python scripts/verify_build.py dist
 | F-004 | 通常の成功系testがPyPIとpackage indexのavailabilityに依存している | P2-06a/P2-06b | `done` |
 | F-005 | sdist build backendを暗黙に実行する可能性がある | P2-07 | `done` |
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
-| F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない | P6-01（上流連携） | `todo` |
+| F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
