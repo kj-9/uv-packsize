@@ -51,7 +51,7 @@ from uv_packsize.inventory import InventoryScanError, InventoryScanErrorCode
 from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy, CaseRule
 
-EXPECTED_VERSION = "0.1.2"
+EXPECTED_VERSION = "0.2.0a1"
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
@@ -63,6 +63,7 @@ def test_project_metadata():
         rf'^version = "{re.escape(EXPECTED_VERSION)}"$', project, re.MULTILINE
     )
     assert re.search(r'^requires-python = ">=3\.10"$', project, re.MULTILINE)
+    assert '"Development Status :: 3 - Alpha"' in project
 
     classifier_block = re.search(
         r"^classifiers = \[(.*?)^\]$", project, re.MULTILINE | re.DOTALL
@@ -207,16 +208,31 @@ def test_publish_workflow_verifies_supported_release_artifacts():
             r'^\s+version: "([^"]+)"$', job.group("body"), re.MULTILINE
         ) == ["0.11.3"]
 
-    assert re.search(r"^\s+needs: \[test\]$", deploy_job.group("body"), re.MULTILINE)
+    assert re.search(
+        r"^\s+needs: \[verify, test\]$", deploy_job.group("body"), re.MULTILINE
+    )
     assert re.search(r"^\s+make verify-build$", deploy_job.group("body"), re.MULTILINE)
     assert deploy_job.group("body").index("make verify-build") < deploy_job.group(
         "body"
     ).index("uses: pypa/gh-action-pypi-publish")
 
 
+def test_publish_workflow_checks_out_and_validates_the_release_tag():
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "publish.yml").read_text()
+
+    assert workflow.count("ref: ${{ github.event.release.tag_name }}") == 3
+    assert "fetch-depth: 0" in workflow
+    assert "RELEASE_TAG: ${{ github.event.release.tag_name }}" in workflow
+    assert 'expected_tag="v$(python -c' in workflow
+    assert "refs/tags/$RELEASE_TAG^{commit}" in workflow
+    assert '"$GITHUB_SHA"' in workflow
+    assert "uv lock --check" in workflow
+    assert "make ci-check" in workflow
+
+
 def test_build_verifier_rejects_unexpected_publish_file(tmp_path):
-    (tmp_path / "uv_packsize-0.1.2-py3-none-any.whl").touch()
-    (tmp_path / "uv_packsize-0.1.2.tar.gz").touch()
+    (tmp_path / "uv_packsize-0.2.0a1-py3-none-any.whl").touch()
+    (tmp_path / "uv_packsize-0.2.0a1.tar.gz").touch()
     unexpected = tmp_path / "uv_packsize-0.1.1-py3-none-any.whl"
     unexpected.touch()
 

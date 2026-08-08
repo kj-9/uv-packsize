@@ -1,8 +1,20 @@
 # uv-packsize ロードマップ
 
-最終更新: 2026-07-19
+最終更新: 2026-08-09
 
 実際のタスク状態と検証記録は[`implementation-plan.md`](./implementation-plan.md)で管理する。
+
+## αリリース方針
+
+Phase 2〜6で追加した測定inventory、versioned JSON、baseline/budget、locked
+project analysisは、公開済みの`0.1.1`から機能範囲が大きく広がる。最初の先行
+公開はPEP 440の`0.2.0a1`とし、安定版`0.2.0`を約束するものではない。
+
+公開は`v0.2.0a1`のGitHub Release作成を契機とする。publish workflowはその
+release tagをcheckoutし、tag・checkout SHA・`pyproject.toml`のversionの一致、
+lock、静的検査、対応Python全テスト、artifact検証を通過した場合だけPyPIへ
+trusted publishingで送る。tag、release、publishはリリース担当者が明示的に
+実施する。
 
 ## 1. この文書の目的
 

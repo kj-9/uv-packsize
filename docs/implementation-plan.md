@@ -16,6 +16,7 @@
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
+| αリリース準備 | `0.2.0a1`へ更新中。公開操作は明示承認待ち。 |
 
 ## ステータス定義
 
@@ -904,6 +905,35 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-09: `0.2.0a1` αリリース準備
+
+状態: `done`（外部公開操作を除く）
+
+変更:
+
+- PyPIの最新公開版`0.1.1`と、source/lockの未公開`0.1.2`を確認した。Phase 2〜6の大きな機能追加を最初に公開する先行版は、PEP 440の`0.2.0a1`とした。
+- `pyproject.toml`、`uv.lock`、artifact verifierとその回帰テストを`0.2.0a1`へ同期し、`Development Status :: 3 - Alpha` classifierを追加した。
+- publish workflowはrelease tagを明示checkoutする。`v<project version>`とのtag一致、および解決したtag commitと`GITHUB_SHA`の一致を確認してから、`uv lock --check`と`make ci-check`を実行する。対応Python matrixのtestとartifact verifierも通過した場合だけtrusted publishingへ進む。
+- release、tag、push、GitHub Actionsの実行、PyPI publishは実施していない。既存`dist/`に`0.1.2` artifactが残るため、verifierが想定どおりrejectした。既存artifactは削除せず、一意なtemporary out directoryでrelease candidate artifactを検証した。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+uv build --no-sources --out-dir <temporary-directory>
+uv run --locked python scripts/verify_build.py <temporary-directory>
+ruby -e 'require "yaml"; YAML.safe_load(File.read(".github/workflows/publish.yml"), permitted_classes: [], permitted_symbols: [], aliases: true)'
+git diff --check
+```
+
+結果:
+
+- lock check、Ruff format/lint、ty、README生成整合性、YAML parse、whitespace checkは成功した。
+- 全878テストが成功し、2件は既存skipだった。
+- temporary out directoryのwheelとsdistはName `uv-packsize`、Version `0.2.0a1`、metadata、archive構造、entry pointを検証した。
 
 ### 2026-08-02: P5-01 `uv workspace metadata` schema investigation and compatibility boundary
 
