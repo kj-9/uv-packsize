@@ -10,13 +10,13 @@
 |---|---|
 | 現在のPhase | Phase 6: エコシステム連携（`done`） |
 | `in_progress` | なし |
-| 次のタスク | なし（Phase 7はロードマップに未定義のため、再計画待ち） |
+| 次のタスク | αリリースの外部公開判断待ち |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a2`へ更新済み。公開操作は明示承認待ち。 |
+| αリリース準備 | `0.2.0a3`へ更新済み。公開操作は明示承認待ち。 |
 
 ## ステータス定義
 
@@ -906,9 +906,50 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ## 作業記録
 
-### 2026-08-09: `0.2.0a2` αリリース再準備
+### 2026-08-09: `0.2.0a3` αリリース再準備
 
 状態: `done`（外部公開操作を除く）
+
+変更:
+
+- `0.2.0a2`のGitHub pre-releaseはLinuxのbaseline writer failureによりCIで停止し、PyPI publishは実行されなかった。既存tagを付け替えず欠番として残す。
+- 修正版を`0.2.0a3`として再公開する方針に従い、project metadata、lock root package、artifact verifier、およびversionを固定する回帰テストを同期した。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+uv build --no-sources --out-dir <temporary-directory>
+uv run --locked python scripts/verify_build.py <temporary-directory>
+git diff --check
+```
+
+結果:
+
+- lock check、format/lint/typecheck、README生成整合性、whitespace checkは成功した。
+- 全880テストが成功し、2件は既存skipだった。
+- temporary out directoryのwheelとsdistはName `uv-packsize`、Version `0.2.0a3`、metadata、archive構造、entry pointを検証した。
+
+### 2026-08-09: αリリース blocker — Linux baseline atomic writer feature 検出
+
+状態: `done`
+
+- 一部のLinux CPythonでは`os.lstat`が`os.supports_dir_fd`へ載らず、実際に安全に使えるdescriptor-relative write経路まで`unsupported-platform`で停止していた。
+- no-follow metadata取得を、Python APIが個別にcapabilityを示す`os.stat(..., dir_fd=..., follow_symlinks=False)`へ統一した。事前検査は`stat`の`dir_fd`と`follow_symlinks=False`双方を必須にし、parent/target/tempのsymlink拒否、descriptor identity照合、atomic publish/recoveryの契約を維持した。
+- `lstat`の`dir_fd` capabilityが広告されないplatformをmonkeypatchして書込み成功を確認し、no-follow capabilityがなければopen前に安全側で拒否する回帰を追加した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-baseline-linux-fix-cache uv run --locked pytest tests/test_baseline_write.py -q` — 17 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-baseline-linux-fix-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-baseline-linux-fix-cache make test` — 880 passed, 2 skipped。
+- `git diff --check` — 成功。
+
+### 2026-08-09: `0.2.0a2` αリリース再準備
+
+状態: `superseded`（Linux baseline writer failureによりpublish前に停止）
 
 変更:
 

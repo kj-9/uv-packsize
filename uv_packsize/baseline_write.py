@@ -92,7 +92,7 @@ def _validate_payload(payload: bytes) -> None:
 def _features() -> None:
     required = (
         "open",
-        "lstat",
+        "stat",
         "fstat",
         "link",
         "unlink",
@@ -104,15 +104,26 @@ def _features() -> None:
     if (
         os.name != "posix"
         or not hasattr(os, "supports_dir_fd")
+        or not hasattr(os, "supports_follow_symlinks")
         or not all(hasattr(os, name) for name in required)
     ):
         _fail("unsupported-platform", "file")
     if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
         _fail("unsupported-platform", "file")
-    # ``supports_dir_fd`` is the only portable statement that these calls accept
-    # descriptor-relative paths.  Do this before opening any user-controlled path.
-    if not {os.open, os.lstat, os.link, os.unlink}.issubset(os.supports_dir_fd):
+    # ``supports_dir_fd`` and ``supports_follow_symlinks`` are the portable
+    # statements that descriptor-relative, no-follow ``stat`` is available.
+    # Do this before opening any user-controlled path.
+    if (
+        not {os.open, os.stat, os.link, os.unlink}.issubset(os.supports_dir_fd)
+        or os.stat not in os.supports_follow_symlinks
+    ):
         _fail("unsupported-platform", "file")
+
+
+def _lstat(path: str, *, dir_fd: int | None = None) -> os.stat_result:
+    """Return no-follow metadata through the explicitly checked stat APIs."""
+
+    return os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
 
 
 def _effective_uid() -> int:
@@ -164,7 +175,7 @@ def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
     fd: int | None = None
     try:
         anchor = "/" if absolute else "."
-        before = os.lstat(anchor)
+        before = _lstat(anchor)
         fd = os.open(anchor, flags)
         opened = os.fstat(fd)
         if not stat.S_ISDIR(opened.st_mode) or (before.st_dev, before.st_ino) != (
@@ -175,7 +186,7 @@ def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
         if not _trusted_parent(opened, uid):
             _fail("unsafe-parent", "file")
         for component in parents:
-            before = os.lstat(component, dir_fd=fd)
+            before = _lstat(component, dir_fd=fd)
             if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
                 _fail("unsafe-parent", "file")
             child: int | None = None
@@ -209,7 +220,7 @@ def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
 
 def _target(parent: int, name: str, absent: bool, uid: int) -> os.stat_result | None:
     try:
-        item = os.lstat(name, dir_fd=parent)
+        item = _lstat(name, dir_fd=parent)
     except FileNotFoundError:
         if absent:
             return None
@@ -276,7 +287,7 @@ def _write(fd: int, payload: bytes) -> None:
 
 def _verify_temp(parent: int, name: str, fd: int, expected: os.stat_result) -> None:
     try:
-        listed, opened = os.lstat(name, dir_fd=parent), os.fstat(fd)
+        listed, opened = _lstat(name, dir_fd=parent), os.fstat(fd)
     except (OSError, TypeError, NotImplementedError, AttributeError):
         _fail("changed-temp", "file")
     expected_id = (expected.st_dev, expected.st_ino)

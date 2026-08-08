@@ -198,6 +198,38 @@ def test_feature_gate_happens_before_open(tmp_path: Path, monkeypatch):
     assert captured.value.code == "unsupported-platform"
 
 
+def test_write_uses_checked_stat_when_lstat_dir_fd_is_not_advertised(
+    tmp_path: Path, monkeypatch
+):
+    """Older POSIX builds need not advertise lstat despite safe stat support."""
+
+    payload = render_fresh_baseline(_result())
+    supported = set(writer.os.supports_dir_fd)
+    supported.discard(writer.os.lstat)
+    monkeypatch.setattr(writer.os, "supports_dir_fd", supported)
+
+    def fail_lstat(*args: object, **kwargs: object) -> os.stat_result:
+        raise AssertionError("the writer must use checked stat(..., no-follow)")
+
+    monkeypatch.setattr(writer.os, "lstat", fail_lstat)
+    target = _target()
+    write_baseline(target, payload)
+    assert target.read_bytes() == payload
+
+
+def test_feature_gate_requires_stat_nofollow_before_open(tmp_path: Path, monkeypatch):
+    payload = render_fresh_baseline(_result())
+    monkeypatch.setattr(writer.os, "supports_follow_symlinks", set())
+
+    def fail_open(*args: object, **kwargs: object) -> int:
+        raise AssertionError("must not open before feature gate")
+
+    monkeypatch.setattr(writer.os, "open", fail_open)
+    with pytest.raises(BaselineWriteError) as captured:
+        write_baseline(_target(), payload)
+    assert captured.value.code == "unsupported-platform"
+
+
 def test_parent_trust_allows_nonwritable_foreign_anchor_but_rejects_foreign_writable():
     foreign_sticky = SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o1777)
     foreign_readonly = SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o755)
