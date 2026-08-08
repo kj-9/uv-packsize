@@ -21,6 +21,7 @@ from uv_packsize.baseline import (
 from uv_packsize.baseline_write import (
     BaselineWriteError,
     render_fresh_baseline,
+    render_project_lock_baseline,
     write_baseline,
 )
 from uv_packsize.budget import (
@@ -59,7 +60,25 @@ from uv_packsize.installed_metadata import (
 )
 from uv_packsize.inventory import InventoryError
 from uv_packsize.json_render import render_analysis_json
-from uv_packsize.models import BuildPolicy, CaseRule, PathFlavor
+from uv_packsize.models import (
+    BuildPolicy,
+    CaseRule,
+    PathFlavor,
+    ProjectLockContext,
+    normalize_distribution_name,
+)
+from uv_packsize.project_comparison_json_render import (
+    render_project_lock_comparison_json,
+)
+from uv_packsize.project_lock_installer import (
+    ProjectLockInstallError,
+    install_validated_project_lock,
+)
+from uv_packsize.project_lock_json_render import render_project_lock_analysis_json
+from uv_packsize.project_lock_reader import (
+    ProjectLockInputError,
+    _read_validated_project_lock,
+)
 from uv_packsize.render import render_analysis_report
 from uv_packsize.root_contribution_render import render_root_contribution_sections
 from uv_packsize.root_contributions import summarize_root_contributions
@@ -101,6 +120,17 @@ class _BudgetClickError(click.ClickException):
     """A typed public boundary for completed budget-policy violations."""
 
     exit_code = 5
+
+
+def _project_input_failure_message(error: ProjectLockInputError) -> str:
+    return (
+        "Could not read project lock input "
+        f"(code={error.reason.value}, field={error.field.value})."
+    )
+
+
+def _project_install_failure_message(error: ProjectLockInstallError) -> str:
+    return f"Could not install project lock (reason={error.reason.value})."
 
 
 def _baseline_failure_message(error: BaselineError) -> str:
@@ -302,15 +332,46 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Analyze an existing prefix without running or changing it.",
 )
 @click.option(
+    "--project",
+    type=click.Path(path_type=Path),
+    help="Analyze one explicit pyproject.toml with an explicit uv.lock.",
+)
+@click.option(
+    "--lockfile",
+    type=click.Path(path_type=Path),
+    help="Explicit uv.lock used with --project.",
+)
+@click.option(
+    "--workspace-member",
+    help="Select the explicit workspace member by normalized package name.",
+)
+@click.option(
+    "--group",
+    "dependency_groups",
+    multiple=True,
+    help="Include one explicit dependency group (repeatable).",
+)
+@click.option(
+    "--all-groups",
+    is_flag=True,
+    help="Include all validated dependency groups.",
+)
+@click.option(
+    "--extra",
+    "extras",
+    multiple=True,
+    help="Include one explicit extra (repeatable).",
+)
+@click.option(
     "--baseline",
     type=click.Path(path_type=Path),
-    help="Read a baseline JSON file and report its diff from a fresh analysis.",
+    help="Read a baseline JSON file and report its diff from a fresh or project analysis.",
 )
 @click.option(
     "--write-baseline",
     "write_baseline_path",
     type=click.Path(path_type=Path),
-    help="Atomically write the fresh schema v1 analysis JSON to PATH.",
+    help="Atomically write the fresh or project analysis JSON to PATH.",
 )
 @click.option(
     "--overwrite-baseline",
@@ -375,17 +436,26 @@ def _explanation_failure_message(error: Exception) -> str:
 @click.option(
     "--explain",
     is_flag=True,
-    help="Text output only: show installed-metadata dependency paths and attribution.",
+    help=(
+        "Text output only: show installed-metadata dependency paths and attribution. "
+        "Unavailable with --prefix or --project."
+    ),
 )
 @click.option(
     "--breakdown",
     is_flag=True,
-    help="Text output only: show global file-category and dependency-role sizes.",
+    help=(
+        "Text output only: show global file-category and dependency-role sizes. "
+        "Unavailable with --prefix or --project."
+    ),
 )
 @click.option(
     "--contributions",
     is_flag=True,
-    help="Text output only: show non-split requested-root byte contributions.",
+    help=(
+        "Text output only: show non-split requested-root byte contributions. "
+        "Unavailable with --prefix or --project."
+    ),
 )
 @click.option(
     "-p",
@@ -396,6 +466,12 @@ def _explanation_failure_message(error: Exception) -> str:
 def cli(  # noqa: PLR0912, PLR0913, PLR0915
     package_names,
     prefix,
+    project,
+    lockfile,
+    workspace_member,
+    dependency_groups,
+    all_groups,
+    extras,
     baseline,
     write_baseline_path,
     overwrite_baseline,
@@ -415,6 +491,22 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     python_version,
 ):
     """Report the size of a Python package and its dependencies using uv."""
+    project_mode = project is not None or lockfile is not None
+    _validate_project_lock_options(
+        project=project,
+        lockfile=lockfile,
+        package_names=package_names,
+        prefix=prefix,
+        site_packages_relative=site_packages_relative,
+        case_rule=case_rule,
+        workspace_member=workspace_member,
+        dependency_groups=dependency_groups,
+        all_groups=all_groups,
+        extras=extras,
+        explain=explain,
+        breakdown=breakdown,
+        contributions=contributions,
+    )
     if comparison_json and baseline is None:
         raise click.UsageError("--comparison-json requires --baseline.")
     if overwrite_baseline and write_baseline_path is None:
@@ -443,6 +535,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             package_names=package_names,
             site_packages_relative=site_packages_relative,
             case_rule=case_rule,
+            project_mode=project_mode,
         )
     policy = _load_effective_budget_policy(
         budget_config=budget_config,
@@ -480,6 +573,26 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             case_rule=CaseRule(case_rule),
             bin=bin,
             json_output=json_output,
+        )
+        return
+
+    if project_mode:
+        _run_project_lock_analysis(
+            project=project,
+            lockfile=lockfile,
+            workspace_member=workspace_member,
+            dependency_groups=dependency_groups,
+            all_groups=all_groups,
+            extras=extras,
+            baseline=comparison_baseline,
+            write_baseline_path=write_baseline_path,
+            overwrite_baseline=overwrite_baseline,
+            json_output=json_output,
+            comparison_json=comparison_json,
+            allow_build=allow_build,
+            python_version=python_version,
+            policy=policy,
+            bin=bin,
         )
         return
 
@@ -829,13 +942,270 @@ def _validate_baseline_fresh_usage(
     package_names: tuple[str, ...],
     site_packages_relative: tuple[str, ...],
     case_rule: str | None,
+    project_mode: bool,
 ) -> None:
     """Apply fresh-input usage checks before reading a comparison baseline."""
 
     if site_packages_relative or case_rule is not None:
         raise click.UsageError("--site-packages and --case-rule require --prefix.")
-    if not package_names:
+    if not package_names and not project_mode:
         raise click.UsageError("Missing argument 'PACKAGE_NAMES...'.")
+
+
+def _validate_project_lock_options(  # noqa: PLR0913
+    *,
+    project: Path | None,
+    lockfile: Path | None,
+    package_names: tuple[str, ...],
+    prefix: Path | None,
+    site_packages_relative: tuple[str, ...],
+    case_rule: str | None,
+    workspace_member: str | None,
+    dependency_groups: tuple[str, ...],
+    all_groups: bool,
+    extras: tuple[str, ...],
+    explain: bool,
+    breakdown: bool,
+    contributions: bool,
+) -> None:
+    """Guard project mode completely before file, config, or process I/O."""
+
+    project_mode = project is not None or lockfile is not None
+    selection_specified = bool(
+        workspace_member is not None or dependency_groups or all_groups or extras
+    )
+    if not project_mode:
+        if selection_specified:
+            raise click.UsageError(
+                "--workspace-member, --group, --all-groups, and --extra require "
+                "--project and --lockfile."
+            )
+        return
+    if project is None or lockfile is None:
+        raise click.UsageError("--project and --lockfile must be used together.")
+    if package_names:
+        raise click.UsageError("PACKAGE_NAMES cannot be used with --project.")
+    if prefix is not None:
+        raise click.UsageError("--prefix cannot be used with --project.")
+    if site_packages_relative or case_rule is not None:
+        raise click.UsageError("--site-packages and --case-rule require --prefix.")
+    if dependency_groups and all_groups:
+        raise click.UsageError("--group cannot be used with --all-groups.")
+    for enabled, option in (
+        (explain, "--explain"),
+        (breakdown, "--breakdown"),
+        (contributions, "--contributions"),
+    ):
+        if enabled:
+            raise click.UsageError(f"{option} cannot be used with --project.")
+    _validate_project_lock_selector(workspace_member, "--workspace-member")
+    for group in dependency_groups:
+        _validate_project_lock_selector(group, "--group")
+    for extra in extras:
+        _validate_project_lock_selector(extra, "--extra")
+
+
+def _validate_project_lock_selector(value: str | None, option: str) -> None:
+    """Reject unsafe selector syntax before reading project/lock inputs."""
+
+    if value is None:
+        return
+    try:
+        normalize_distribution_name(value)
+    except (TypeError, ValueError):
+        raise click.UsageError(f"{option} must be a safe package name.") from None
+
+
+def _project_lock_context(selection, environment, *, build_policy: BuildPolicy):
+    """Project a probed temporary prefix into the safe schema-v3 context."""
+
+    observed = environment.context
+    return ProjectLockContext(
+        root_package=selection.root_package,
+        workspace_member=selection.workspace_member,
+        dependency_group_selection=selection.dependency_group_selection,
+        dependency_groups=selection.dependency_groups,
+        extras=selection.extras,
+        python_version=observed.python_version,
+        platform=observed.platform,
+        architecture=observed.architecture,
+        path_flavor=observed.path_flavor,
+        case_rule=observed.case_rule,
+        uv_version=observed.uv_version,
+        build_policy=build_policy,
+        compile_bytecode=False,
+        resolution_strategy="highest",
+        lock_identity=selection.lock_identity,
+    )
+
+
+def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
+    *,
+    project: Path | None,
+    lockfile: Path | None,
+    workspace_member: str | None,
+    dependency_groups: tuple[str, ...],
+    all_groups: bool,
+    extras: tuple[str, ...],
+    baseline,
+    write_baseline_path: Path | None,
+    overwrite_baseline: bool,
+    json_output: bool,
+    comparison_json: bool,
+    allow_build: bool,
+    python_version: str | None,
+    policy: BudgetPolicy | None,
+    bin: bool,
+) -> None:
+    """Run the project-lock path without reopening validated input bytes."""
+
+    assert project is not None and lockfile is not None
+    try:
+        snapshot = _read_validated_project_lock(
+            project,
+            lockfile,
+            workspace_member=workspace_member,
+            dependency_groups=dependency_groups,
+            all_groups=all_groups,
+            extras=extras,
+        )
+    except ProjectLockInputError as error:
+        raise _BaselineClickError(_project_input_failure_message(error)) from None
+    if not shutil.which("uv"):
+        raise click.ClickException(
+            "'uv' command not found. Please install it first. "
+            "See https://github.com/astral-sh/uv for installation instructions."
+        )
+
+    write_mode = write_baseline_path is not None
+    # Project-lock failures must never contaminate stdout, including text mode.
+    progress_to_stderr = True
+    click.echo(
+        "Calculating size for the selected project lock...", err=progress_to_stderr
+    )
+    build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
+    try:
+        uv_version = _uv_version()
+    except UvCommandError as error:
+        raise click.ClickException(
+            _command_failure_message(error, build_policy=build_policy)
+        ) from None
+    except UvVersionError:
+        raise click.ClickException("Could not determine the uv version.") from None
+
+    click.echo("Installing the selected project lock...", err=progress_to_stderr)
+
+    def collect_inventory(target: Path):
+        click.echo("Analyzing sizes...", err=progress_to_stderr)
+        environment = discover_installed_environment(
+            venv_path=target,
+            # The environment adapter currently constructs a fresh context as
+            # an internal probe value. Its non-empty requirement invariant is
+            # satisfied with the validated root name, then immediately
+            # replaced by the dedicated ProjectLockContext below.
+            requirements=(snapshot.selection.root_package,),
+            uv_version=uv_version,
+            build_policy=build_policy,
+            compile_bytecode=False,
+            extras=(),
+            index_identifiers=(),
+            resolution_strategy="highest",
+        )
+        context = _project_lock_context(
+            snapshot.selection, environment, build_policy=build_policy
+        )
+        return analyze_installed_environment(
+            context=context, layouts=environment.layouts
+        )
+
+    try:
+        result = install_validated_project_lock(
+            snapshot,
+            build_policy=build_policy,
+            collect_inventory=collect_inventory,
+            python_version=python_version,
+        )
+    except ProjectLockInstallError as error:
+        raise click.ClickException(_project_install_failure_message(error)) from None
+    except (EnvironmentDiscoveryError, AnalysisContextError, InventoryError) as error:
+        raise click.ClickException(_analysis_failure_message(error)) from None
+
+    current_baseline = None
+    diff = None
+    if baseline is not None or policy is not None:
+        try:
+            current_baseline = analysis_result_to_baseline(result)
+        except ValueError:
+            raise click.ClickException(
+                "Could not evaluate the analysis result."
+            ) from None
+    if baseline is not None:
+        click.echo("Comparing with baseline...", err=True)
+        try:
+            assert current_baseline is not None
+            diff = compare_baselines(baseline, current_baseline)
+        except IncompatibleComparisonError as error:
+            raise _ComparisonClickError(_comparison_failure_message(error)) from None
+        except ValueError:
+            raise click.ClickException(
+                "Could not compare the analysis result."
+            ) from None
+
+    budget_evaluation = _evaluate_budget_policy(
+        policy=policy, current_baseline=current_baseline, comparison=diff
+    )
+    if baseline is not None:
+        assert diff is not None
+        if comparison_json:
+            if budget_evaluation is not None and not budget_evaluation.passed:
+                _raise_budget_violation(budget_evaluation, json_output=True)
+            try:
+                click.echo(render_project_lock_comparison_json(diff), nl=False)
+            except (TypeError, ValueError):
+                raise click.ClickException(
+                    "Could not render comparison JSON."
+                ) from None
+        else:
+            report = render_diff_report(diff)
+            if budget_evaluation is not None:
+                report = "\n\n".join((report, render_budget_report(budget_evaluation)))
+            click.echo(report)
+            if budget_evaluation is not None and not budget_evaluation.passed:
+                _raise_budget_violation(budget_evaluation, json_output=False)
+        return
+
+    if json_output:
+        if budget_evaluation is not None and not budget_evaluation.passed:
+            _raise_budget_violation(budget_evaluation, json_output=True)
+        if write_mode:
+            _write_project_lock_baseline_if_requested(
+                write_baseline_path, result, overwrite_baseline
+            )
+        click.echo(render_project_lock_analysis_json(result), nl=False)
+    else:
+        report = render_analysis_report(result, show_scripts=bin)
+        if budget_evaluation is not None:
+            report = "\n\n".join((report, render_budget_report(budget_evaluation)))
+        if budget_evaluation is not None and not budget_evaluation.passed:
+            click.echo(report)
+            _raise_budget_violation(budget_evaluation, json_output=False)
+        _write_project_lock_baseline_if_requested(
+            write_baseline_path, result, overwrite_baseline
+        )
+        click.echo(report)
+    click.echo("\nCalculation complete.", err=progress_to_stderr)
+
+
+def _write_project_lock_baseline_if_requested(
+    path: Path | None, result, overwrite: bool
+) -> None:
+    if path is None:
+        return
+    try:
+        payload = render_project_lock_baseline(result)
+        write_baseline(path, payload, overwrite=overwrite)
+    except BaselineWriteError as error:
+        raise _BaselineClickError(_baseline_write_failure_message(error)) from None
 
 
 def _validate_prefix_options(  # noqa: PLR0913

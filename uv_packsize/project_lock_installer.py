@@ -96,6 +96,10 @@ def _isolated_uv_environment(target: Path) -> dict[str, str]:
             if value is not None:
                 environment[key] = value
     environment["UV_PROJECT_ENVIRONMENT"] = str(target)
+    # Do not let a fully isolated child fall back to a user cache. Keeping its
+    # cache beside the target makes it both private to this sync and covered by
+    # the bridge's unconditional temporary-root cleanup.
+    environment["UV_CACHE_DIR"] = str(target.parent / "uv-cache")
     environment["UV_NO_CONFIG"] = "1"
     return environment
 
@@ -105,6 +109,7 @@ def install_validated_project_lock(  # noqa: PLR0912, PLR0915
     *,
     build_policy: BuildPolicy,
     collect_inventory: InventoryCollector[_Result],
+    python_version: str | None = None,
     run_uv_sync: UvSyncRunner = _run_uv_sync,
 ) -> _Result:
     """Sync a private snapshot into a temporary prefix and collect its inventory.
@@ -140,7 +145,7 @@ def install_validated_project_lock(  # noqa: PLR0912, PLR0915
 
         target = temporary_root / "environment"
         environment = _isolated_uv_environment(target)
-        command = _sync_command(snapshot, stage, build_policy)
+        command = _sync_command(snapshot, stage, build_policy, python_version)
         try:
             sync_result = run_uv_sync(command, environment)
         except Exception:
@@ -186,6 +191,7 @@ def _sync_command(
     snapshot: _ValidatedProjectLockSnapshot,
     stage: Path,
     build_policy: BuildPolicy,
+    python_version: str | None = None,
 ) -> list[str]:
     """Build an explicit uv argv solely from validated selection and policy."""
 
@@ -199,6 +205,10 @@ def _sync_command(
         "--no-install-project",
         "--no-default-groups",
     ]
+    if python_version is not None:
+        if not isinstance(python_version, str) or not python_version:
+            raise TypeError("python_version must be a non-empty string or None")
+        command.extend(("--python", python_version))
     if selection.dependency_group_selection is DependencyGroupSelection.ALL:
         command.append("--all-groups")
     elif selection.dependency_group_selection is DependencyGroupSelection.EXPLICIT:

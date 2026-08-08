@@ -44,9 +44,18 @@ Options:
   --version                       Show the version and exit.
   --prefix PATH                   Analyze an existing prefix without running or
                                   changing it.
+  --project PATH                  Analyze one explicit pyproject.toml with an
+                                  explicit uv.lock.
+  --lockfile PATH                 Explicit uv.lock used with --project.
+  --workspace-member TEXT         Select the explicit workspace member by
+                                  normalized package name.
+  --group TEXT                    Include one explicit dependency group
+                                  (repeatable).
+  --all-groups                    Include all validated dependency groups.
+  --extra TEXT                    Include one explicit extra (repeatable).
   --baseline PATH                 Read a baseline JSON file and report its diff
-                                  from a fresh analysis.
-  --write-baseline PATH           Atomically write the fresh schema v1 analysis
+                                  from a fresh or project analysis.
+  --write-baseline PATH           Atomically write the fresh or project analysis
                                   JSON to PATH.
   --overwrite-baseline            Replace an existing --write-baseline target
                                   explicitly.
@@ -72,11 +81,14 @@ Options:
   --incomplete-policy [fail|allow-partial]
                                   Budget handling for incomplete measurements.
   --explain                       Text output only: show installed-metadata
-                                  dependency paths and attribution.
+                                  dependency paths and attribution. Unavailable
+                                  with --prefix or --project.
   --breakdown                     Text output only: show global file-category
-                                  and dependency-role sizes.
+                                  and dependency-role sizes. Unavailable with
+                                  --prefix or --project.
   --contributions                 Text output only: show non-split requested-
-                                  root byte contributions.
+                                  root byte contributions. Unavailable with
+                                  --prefix or --project.
   -p, --python TEXT               Specify the Python version for the virtual
                                   environment.
   --help                          Show this message and exit.
@@ -88,6 +100,54 @@ You can also use:
 ```bash
 python -m uv_packsize --help
 ```
+
+### Locked project analysis
+
+Use `--project` and `--lockfile` together to measure the dependencies selected
+by one explicit `pyproject.toml` and `uv.lock` pair. This mode runs a private,
+locked `uv sync`; it neither discovers a project from the current directory nor
+changes either input file.
+
+```bash
+uv-packsize --project pyproject.toml --lockfile uv.lock --json > analysis.json
+uv-packsize --project pyproject.toml --lockfile uv.lock --group test
+uv-packsize --project pyproject.toml --lockfile uv.lock --all-groups --extra docs
+```
+
+The default selects no dependency groups. Add a repeatable `--group NAME`, or
+use `--all-groups` (they are mutually exclusive); add a repeatable `--extra
+NAME` for extras. Group and extra names are normalized package names and must
+be declared consistently in both explicit inputs. `--workspace-member NAME`
+selects the named root member in the currently supported single-root subset.
+Positional package requirements, `--prefix`, and the prefix-layout options
+cannot be combined with project/lock mode.
+`--explain`, `--breakdown`, and `--contributions` are also unavailable because
+this mode does not yet model a project-root dependency graph. Progress and
+diagnostics go to stderr, so stdout contains only a successful report or JSON
+document.
+
+The tool reads each input once after rejecting symlinks and unstable files,
+validates its supported lock subset, then stages those same bytes under the
+standard filenames in a unique temporary directory. It invokes `uv sync` with
+`--locked`, `--no-install-project`, and `--no-default-groups`, plus only the
+validated selection flags. It does not use `--frozen`, `--lockfile`, workspace
+metadata, ambient project discovery, active virtual environments, or ambient
+`UV_*` configuration. The staged directory and temporary environment are
+removed after success or failure.
+
+The local root project is deliberately not installed or measured. Its source
+tree and build configuration cannot be reproduced safely from lock bytes, and
+measuring it could execute local build code. This initial mode therefore
+reports the selected locked dependencies only. Local-path, VCS, and workspace
+dependency sources outside the supported subset are rejected rather than
+silently approximated.
+
+Project/lock output uses [analysis result schema v3](./schemas/analysis-result-v3.schema.json).
+Its context records the normalized root/member, effective group and extra
+selection, measurement conditions, build policy, and an opaque `lock_identity`
+fingerprint. That fingerprint permits correlation of identical lock contents;
+it does not expose the lock, paths, sources, URLs, credentials, or opaque uv
+identifiers. Treat it as correlation metadata when sharing an analysis.
 
 ### Existing prefix analysis
 
@@ -175,7 +235,7 @@ output. It is intended for recording, comparison, and further processing:
 uv-packsize requests==2.32.5 --json > analysis.json
 ```
 
-Successful JSON output conforms to the committed
+Fresh package-request JSON conforms to the committed
 [analysis result schema v1](./schemas/analysis-result-v1.schema.json). Its
 top-level fields describe the schema version, measurement definition,
 resolution context, resolved distributions and their file inventories,
@@ -202,6 +262,10 @@ the schema v1 compatibility boundary.
 `--breakdown` and `--contributions` follow the same rule, including when
 combined with other text-only options:
 all `--json` combinations preserve the same schema v1 bytes as `--json` alone.
+Project/lock JSON is instead schema v3; existing-prefix JSON is schema v2.
+These schemas are distinct input families, so consumers must check
+`schema_version` and `context.input_kind` before interpreting or comparing a
+record.
 
 ### Baseline comparison
 
@@ -215,21 +279,24 @@ uv-packsize requests==2.32.5 --baseline baseline.json --comparison-json
 ```
 
 The default comparison writes only the text diff report to standard output.
-`--comparison-json` instead writes one successful, versioned JSON document
-conforming to the committed [comparison result schema v1](./schemas/comparison-result-v1.schema.json),
-including its final newline. It is a closed `comparison-result-v1` contract;
-consumers must check `schema_version` before interpreting it. This comparison
-document is separate from analysis-result JSON v1/v2: it reports the baseline
-and current global/distribution aggregates, every distribution change,
+For fresh package requests, `--comparison-json` writes the closed
+[comparison result schema v1](./schemas/comparison-result-v1.schema.json),
+including its final newline. Project/lock baselines instead use the closed
+[comparison result schema v2](./schemas/comparison-result-v2.schema.json).
+Both comparison documents are separate from analysis JSON: they report the
+baseline and current global/distribution aggregates, every distribution change,
 nonreconciliation, and completeness rather than a file inventory.
 
 Comparison JSON exposes an opaque context fingerprint for correlation, not raw
 requirements, paths, resolver observations, or the individual context
-fingerprints. The two measurements must use the same measurement definition
+fingerprints. Project/lock comparison v2 never publishes either lock identity;
+it exposes only `lock_changed` to state whether the two lock fingerprints
+differ. The two measurements must use the same measurement definition
 and resolution context (including requirements, Python/platform fingerprints,
-build policy, and resolver conditions). Existing-prefix schema v2 baselines
-are deliberately not comparable yet. The baseline file is read once and never
-modified.
+build policy, and resolver conditions). Baselines can be compared only within
+their input family: fresh-install v1 with v1, or project-lock v3 with v3.
+Existing-prefix schema v2 baselines are deliberately not comparable yet. The
+baseline file is read once and never modified.
 
 The report shows both the deduplicated global logical-size change and the
 distribution-owned aggregate change. They can differ when multiple
@@ -250,9 +317,10 @@ on success.
 
 ### Writing a baseline
 
-For fresh-install measurements, `--write-baseline PATH` writes the same
-readable schema v1 JSON document that `--json` emits. It is useful when the
-measurement is both a CI artifact and the next comparison input:
+For a fresh-install or project/lock measurement, `--write-baseline PATH` writes
+the same readable JSON document that `--json` emits (schema v1 or v3,
+respectively). It is useful when the measurement is both a CI artifact and the
+next comparison input:
 
 ```bash
 uv-packsize requests==2.32.5 --json --write-baseline baseline.json
@@ -274,8 +342,8 @@ uv-packsize requests==2.32.5 --json \
   --write-baseline baseline.json --overwrite-baseline
 ```
 
-`--overwrite-baseline` requires `--write-baseline`. Writing is fresh-only and
-cannot be combined with `--prefix` or `--baseline` (and consequently not with
+`--overwrite-baseline` requires `--write-baseline`. Writing is unavailable with
+`--prefix` and cannot be combined with `--baseline` (and consequently not with
 `--comparison-json`). In write mode all progress and `Calculation complete.`
 go to stderr; stdout is only the successful final report or JSON. Render and
 write failures also use exit 3, contain only a fixed `code` and `field`, and
@@ -296,10 +364,10 @@ uv-packsize requests==2.32.5 --json > baseline.json
 
 ### Size budgets
 
-Apply an explicit size policy to a fresh-install analysis with a project file,
-individual command-line limits, or both. There is no automatic `pyproject.toml`
-discovery: `--budget-config` reads exactly the path supplied and uses only its
-`[tool.uv-packsize.budget]` table.
+Apply an explicit size policy to a fresh-install or project/lock analysis with
+a project file, individual command-line limits, or both. There is no automatic
+`pyproject.toml` discovery: `--budget-config` reads exactly the path supplied
+and uses only its `[tool.uv-packsize.budget]` table.
 
 ```toml
 [tool.uv-packsize.budget]
@@ -321,8 +389,9 @@ overrides only its corresponding field, while unspecified fields remain from
 the file. An absent budget table supplies no policy, while an explicit empty
 table or `--incomplete-policy` alone is a valid no-op policy.
 
-An increase limit requires `--baseline`; the comparison must pass the existing
-schema-v1 compatibility checks before the delta can be evaluated. Total-only
+An increase limit requires `--baseline`; the comparison must pass its matching
+fresh-install-v1 or project-lock-v3 compatibility checks before the delta can
+be evaluated. Total-only
 policies do not use baseline size, completeness, or nonreconciliation as a
 budget input. By default, a policy with a limit fails incomplete measurements;
 `--incomplete-policy allow-partial` suppresses only that incomplete-result
@@ -405,10 +474,11 @@ normal report rendered once and its contribution sections last.
 
 ## Measurement
 
-`uv-packsize` creates a temporary virtual environment, installs all requested
-packages and their resolved dependencies with `uv pip install`, and then scans
-the installed distributions. The environment is removed after the command
-finishes.
+For package requests, `uv-packsize` creates a temporary virtual environment,
+installs all requested packages and their resolved dependencies with `uv pip
+install`, and then scans the installed distributions. Project/lock mode instead
+uses the isolated locked sync described above. The temporary environment is
+removed after the command finishes.
 
 For each distribution, its `.dist-info/RECORD` file is the source of file
 ownership. The measurement scope is the temporary environment prefix, not just
@@ -456,10 +526,10 @@ Sizes use binary units: `KiB`, `MiB`, and `GiB` are powers of 1024.
 ### Installation safety
 
 The default installer is wheel-only: it passes `--no-build` to `uv pip install`
-and does not permit source builds. If no compatible wheel is available, the
-command fails without running that distribution's build backend. It may reuse a
-compatible wheel that was already built in the `uv` cache; the guarantee is that
-this invocation does not build an sdist.
+or the private `uv sync`, and does not permit source builds. If no compatible
+wheel is available, the command fails without running that distribution's build
+backend. It may reuse a compatible wheel that was already built in the `uv`
+cache; the guarantee is that this invocation does not build an sdist.
 
 Use `--allow-build` only as an explicit permission to let `uv` build from
 source when needed. A temporary virtual environment isolates the install

@@ -14,7 +14,8 @@ from uv_packsize.baseline import (
     parse_baseline_json,
 )
 from uv_packsize.json_render import render_analysis_json
-from uv_packsize.models import AnalysisResult, ResolutionContext
+from uv_packsize.models import AnalysisResult, ProjectLockContext, ResolutionContext
+from uv_packsize.project_lock_json_render import render_project_lock_analysis_json
 
 _NATIVE_PATH_TYPE = type(Path("."))
 
@@ -51,6 +52,27 @@ def render_fresh_baseline(result: AnalysisResult) -> bytes:
     return payload
 
 
+def render_project_lock_baseline(result: AnalysisResult) -> bytes:
+    """Return the closed v3 JSON document for one project-lock result."""
+
+    if (
+        type(result) is not AnalysisResult
+        or type(result.context) is not ProjectLockContext
+    ):
+        _fail("not-project-lock-analysis")
+    try:
+        payload = render_project_lock_analysis_json(result).encode("utf-8")
+        if len(payload) > MAX_BASELINE_BYTES:
+            _fail("size-limit")
+        if parse_baseline_json(payload) != analysis_result_to_baseline(result):
+            _fail("projection-mismatch")
+    except BaselineWriteError:
+        raise
+    except (BaselineError, UnicodeError, ValueError, TypeError, OverflowError):
+        _fail("render-failed")
+    return payload
+
+
 def _validate_payload(payload: bytes) -> None:
     if type(payload) is not bytes:
         raise TypeError("payload must be bytes")
@@ -60,8 +82,11 @@ def _validate_payload(payload: bytes) -> None:
         baseline = parse_baseline_json(payload)
     except BaselineError as error:
         _fail(error.code)
-    if baseline.schema_version != 1 or baseline.input_kind != "fresh-install":
-        _fail("not-fresh-baseline")
+    if (baseline.schema_version, baseline.input_kind) not in {
+        (1, "fresh-install"),
+        (3, "project-lock"),
+    }:
+        _fail("unsupported-baseline")
 
 
 def _features() -> None:

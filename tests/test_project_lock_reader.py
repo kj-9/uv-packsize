@@ -56,6 +56,51 @@ version = "1.0.0"
 source = { registry = "https://index.example.invalid/simple" }
 """
 
+# Representative output of ``uv 0.11.3 lock --offline`` for a project whose
+# dependencies are resolved from a local wheelhouse.  It deliberately carries
+# path-valued lock internals, but the reader may only return its safe selection
+# projection and content fingerprint.
+CURRENT_UV_LOCK = """\
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[[package]]
+name = "uv-packsize-fixture-root-a"
+version = "1.0.0"
+source = { registry = "/locked-fixtures/wheelhouse" }
+dependencies = [{ name = "uv-packsize-fixture-shared" }]
+wheels = [{ path = "/locked-fixtures/wheelhouse/uv_packsize_fixture_root_a-1.0.0-py3-none-any.whl" }]
+
+[[package]]
+name = "uv-packsize-fixture-shared"
+version = "1.0.0"
+source = { registry = "/locked-fixtures/wheelhouse" }
+wheels = [{ path = "/locked-fixtures/wheelhouse/uv_packsize_fixture_shared-1.0.0-py3-none-any.whl" }]
+
+[[package]]
+name = "example-project"
+version = "1.0.0"
+source = { virtual = "." }
+dependencies = [{ name = "uv-packsize-fixture-root-a" }]
+
+[package.optional-dependencies]
+speed = [{ name = "uv-packsize-fixture-shared" }]
+
+[package.dev-dependencies]
+test = [{ name = "uv-packsize-fixture-shared" }]
+
+[package.metadata]
+requires-dist = [
+    { name = "uv-packsize-fixture-root-a", specifier = "==1.0.0" },
+    { name = "uv-packsize-fixture-shared", marker = "extra == 'speed'", specifier = "==1.0.0" },
+]
+provides-extras = ["speed"]
+
+[package.metadata.requires-dev]
+test = [{ name = "uv-packsize-fixture-shared", specifier = "==1.0.0" }]
+"""
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -86,6 +131,18 @@ def test_accepts_this_repositorys_standard_project_and_lock_shape():
     assert value.root_package == "uv-packsize"
     assert value.dependency_group_selection is DependencyGroupSelection.ALL
     assert value.dependency_groups == ("dev",)
+
+
+def test_accepts_current_uv_local_wheel_lock_shape_without_exposing_paths(tmp_path):
+    project, lock = write_inputs(tmp_path, lock=CURRENT_UV_LOCK)
+
+    value = read_project_lock(project, lock, dependency_groups=("test",))
+
+    assert value.root_package == "example-project"
+    assert value.dependency_groups == ("test",)
+    assert value.extras == ()
+    assert "/locked-fixtures" not in repr(value)
+    assert ".whl" not in repr(value)
 
 
 def test_reads_only_safe_selection_and_domain_separated_lock_identity(tmp_path):
@@ -213,7 +270,6 @@ def test_rejects_invalid_or_ambiguous_selection_without_echoing_labels(
             'source = { registry = "https://index.example.invalid/simple" }',
             'source = { editable = "../private-member" }',
         ),
-        LOCK.replace('source = { editable = "." }', 'source = { virtual = "." }'),
         LOCK.replace('name = "speed-dep"', 'name = "test-dep"'),
     ],
 )
@@ -324,6 +380,32 @@ def test_rejects_unknown_or_incomplete_closed_subset_without_reflection(
     assert captured.value.reason is ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK
     assert "token" not in str(captured.value)
     assert "example.invalid" not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        CURRENT_UV_LOCK.replace(
+            'source = { virtual = "." }', 'source = { virtual = "../project" }'
+        ),
+        CURRENT_UV_LOCK.replace(
+            'wheels = [{ path = "/locked-fixtures/wheelhouse/uv_packsize_fixture_root_a-1.0.0-py3-none-any.whl" }]',
+            'wheels = [{ path = "/locked-fixtures/wheelhouse/uv_packsize_fixture_root_a-1.0.0-py3-none-any.whl", hash = "sha256:secret" }]',
+        ),
+        CURRENT_UV_LOCK.replace('specifier = "==1.0.0"', 'specifier = ""', 1),
+    ],
+)
+def test_rejects_unknown_or_invalid_current_uv_lock_variants_without_reflection(
+    tmp_path, replacement
+):
+    project, lock = write_inputs(tmp_path, lock=replacement)
+
+    with pytest.raises(ProjectLockInputError) as captured:
+        read_project_lock(project, lock)
+
+    assert captured.value.reason is ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK
+    assert "/locked-fixtures" not in str(captured.value)
+    assert "secret" not in str(captured.value)
 
 
 @pytest.mark.parametrize(

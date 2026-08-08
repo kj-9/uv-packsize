@@ -245,8 +245,10 @@ def _validate_current(value: object) -> Baseline:
         raise BudgetEvaluationError(BudgetEvaluationErrorReason.INVALID_INPUT)
     try:
         validated = _validate_baseline(value)
-        if validated.schema_version != 1:
-            raise ValueError("budget supports only v1 fresh-install baselines")
+        if validated.schema_version not in {1, 3}:
+            raise ValueError(
+                "budget supports only fresh-install or project-lock baselines"
+            )
         return validated
     except (TypeError, ValueError):
         raise BudgetEvaluationError(BudgetEvaluationErrorReason.INVALID_INPUT) from None

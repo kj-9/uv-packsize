@@ -79,11 +79,13 @@ _ROOT_PACKAGE_KEYS: Final = frozenset(
 _NONROOT_PACKAGE_KEYS: Final = frozenset(
     {"name", "version", "source", "dependencies", "sdist", "wheels"}
 )
-_LOCK_DEPENDENCY_KEYS: Final = frozenset({"name", "marker", "extra"})
+_LOCK_DEPENDENCY_KEYS: Final = frozenset({"name", "marker", "extra", "specifier"})
 _PACKAGE_METADATA_KEYS: Final = frozenset(
     {"requires-dist", "requires-dev", "requires-python", "provides-extras"}
 )
 _LOCK_ARTIFACT_KEYS: Final = frozenset({"url", "hash", "size", "upload-time"})
+_LOCK_PATH_ARTIFACT_KEYS: Final = frozenset({"path"})
+_ROOT_SOURCE_VALUES: Final = frozenset({"editable", "virtual"})
 
 
 class _TomlLoader(Protocol):
@@ -516,9 +518,9 @@ def _lock_semantics(document: dict[str, object]) -> dict[str, dict[str, object]]
         )
         name_value = package.get("name")
         name = _normalized_lock_name(name_value, ProjectLockInputField.LOCK)
-        is_root_candidate = name not in packages and package.get("source") == {
-            "editable": "."
-        }
+        is_root_candidate = name not in packages and _is_root_source(
+            package.get("source")
+        )
         _closed_table(
             package,
             _ROOT_PACKAGE_KEYS if is_root_candidate else _NONROOT_PACKAGE_KEYS,
@@ -557,7 +559,11 @@ def _validate_source(source: dict[str, object]) -> None:
             ProjectLockInputField.LOCK,
         )
     kind, value = next(iter(source.items()))
-    if kind not in {"registry", "editable"} or type(value) is not str or not value:
+    if (
+        kind not in {"registry", *_ROOT_SOURCE_VALUES}
+        or type(value) is not str
+        or not value
+    ):
         _fail(
             ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK,
             ProjectLockInputField.LOCK,
@@ -636,8 +642,11 @@ def _validate_lock_context(document: dict[str, object]) -> None:
             ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK,
             ProjectLockInputField.LOCK,
         )
+    options_value = document.get("options")
+    if options_value is None:
+        return
     options = _table(
-        document.get("options"),
+        options_value,
         ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK,
         ProjectLockInputField.LOCK,
     )
@@ -681,6 +690,11 @@ def _validate_artifact(value: object, field: ProjectLockInputField) -> None:
     artifact = _table(
         value, ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK, field
     )
+    if set(artifact) == _LOCK_PATH_ARTIFACT_KEYS:
+        path = artifact.get("path")
+        if type(path) is not str or not path:
+            _fail(ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK, field)
+        return
     _closed_table(
         artifact,
         _LOCK_ARTIFACT_KEYS,
@@ -737,9 +751,19 @@ def _validate_package_metadata(package: dict[str, object]) -> None:
             _normalized_lock_name(extra, ProjectLockInputField.ROOT_PACKAGE)
 
 
+def _is_root_source(value: object) -> bool:
+    """Return whether a root source has the exact non-installed-root shape."""
+
+    return (
+        type(value) is dict
+        and len(value) == 1
+        and next(iter(value.items())) in {(kind, ".") for kind in _ROOT_SOURCE_VALUES}
+    )
+
+
 def _validate_root_source(package: dict[str, object]) -> None:
     source = cast(dict[str, object], package["source"])
-    if source != {"editable": "."}:
+    if not _is_root_source(source):
         _fail(
             ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK,
             ProjectLockInputField.ROOT_PACKAGE,
@@ -844,7 +868,7 @@ def _validate_dependency_list(value: object, field: ProjectLockInputField) -> No
             field,
         )
         _normalized_lock_name(table.get("name"), field)
-        for key in ("marker", "extra"):
+        for key in ("marker", "extra", "specifier"):
             value = table.get(key)
             if value is not None and (type(value) is not str or not value):
                 _fail(ProjectLockInputErrorReason.UNSUPPORTED_PROJECT_LOCK, field)

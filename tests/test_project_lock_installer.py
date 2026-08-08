@@ -354,7 +354,12 @@ def test_bridge_ignores_ambient_uv_and_virtual_environment_controls(
 
     assert observed_environment is not None
     environment = observed_environment
-    expected_keys = {"PATH", "UV_PROJECT_ENVIRONMENT", "UV_NO_CONFIG"}
+    expected_keys = {
+        "PATH",
+        "UV_CACHE_DIR",
+        "UV_PROJECT_ENVIRONMENT",
+        "UV_NO_CONFIG",
+    }
     if os.name == "nt":
         expected_keys.update(
             key for key in _WINDOWS_PROCESS_ENVIRONMENT_KEYS if key in os.environ
@@ -362,12 +367,16 @@ def test_bridge_ignores_ambient_uv_and_virtual_environment_controls(
     assert set(environment) == expected_keys
     assert environment["UV_NO_CONFIG"] == "1"
     assert Path(environment["UV_PROJECT_ENVIRONMENT"]).is_absolute()
+    assert Path(environment["UV_CACHE_DIR"]) == (
+        Path(environment["UV_PROJECT_ENVIRONMENT"]).parent / "uv-cache"
+    )
+    assert environment["UV_CACHE_DIR"] != poisoned_environment["UV_CACHE_DIR"]
     assert (
         environment["UV_PROJECT_ENVIRONMENT"]
         != poisoned_environment["UV_PROJECT_ENVIRONMENT"]
     )
     for key in poisoned_environment:
-        if key not in {"UV_PROJECT_ENVIRONMENT", "UV_NO_CONFIG"}:
+        if key not in {"UV_CACHE_DIR", "UV_PROJECT_ENVIRONMENT", "UV_NO_CONFIG"}:
             assert key not in environment
 
     assert observed_command is not None
