@@ -9,12 +9,12 @@
 | 項目 | 状態 |
 |---|---|
 | 現在のPhase | Phase 5: project/lockと比較分析（`in_progress`） |
-| `in_progress` | P5-03c1: 検証済みproject/lock snapshotを隔離staging経由でtemporary prefixへ適用するinstaller bridge |
-| 次のタスク | P5-03c2: project/lock CLI・public contractをinstaller bridgeへ接続する |
+| `in_progress` | P5-03c2: project/lock CLI・public contractをinstaller bridgeへ接続する |
+| 次のタスク | P5-03c3: offline local-wheel E2E、README、全体検証 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
-| 次の成果物 | validated snapshotを標準名でstagingし、cleanupを保証するtemporary installer bridge |
+| 次の成果物 | installer bridgeをCLI/public contractへ接続し、既存analysis/baseline/comparison/budget/write境界を検証する |
 
 ## ステータス定義
 
@@ -249,7 +249,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P5-02 | Phase 5 | project/lock analysis input/context contractを設計する | `done` |
 | P5-03a | Phase 5 | project/lock context、schema、baseline/comparison projectionをpureに実装する | `done` |
 | P5-03b | Phase 5 | allowlistしたexplicit project/lock readerを実装する | `done` |
-| P5-03c1 | Phase 5 | validated project/lock snapshotをtemporary stagingと`uv sync`へ接続するinstaller bridgeを実装する | `in_progress` |
+| P5-03c1 | Phase 5 | validated project/lock snapshotをtemporary stagingと`uv sync`へ接続するinstaller bridgeを実装する | `done` |
 | P5-03c2 | Phase 5 | project/lock CLI option、exit/stdout boundary、baseline/comparison/budget接続を実装する | `todo` |
 | P5-03c3 | Phase 5 | local-wheel E2E、README、全体回帰でproject/lock公開契約を完了する | `todo` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
@@ -958,8 +958,8 @@ exit / stdout contract:
 |---|---|---|---|---|
 | P5-03a | `done` | P5-02 | `models.py`、pure JSON renderer、schema v3、baseline parser/projection、diff/comparison JSON v2、unit/golden tests | adapter/CLIなしで`ProjectLockContext`、safe label/fingerprint validation、effective selection、v3 closed schema、v3 baseline read/write、compatibility coreと`lock_changed`をpureに固定した。v1/v2 analysisとcomparison v1はbyte不変。 |
 | P5-03b | `done` | P5-03a | isolated explicit project/lock reader、network-free fixtures | `uv workspace metadata`を使わず、explicit native `--project`/`--lockfile`を安全に一度だけ読み、`uv.lock` `version = 1`かつ`revision = 3`と閉じたrequired field subsetだけをparseした。project root/member/group/extra selection、domain-separated lock identity、unknown schema/semantic・曖昧なselectionのsafe rejectionを実装した。 |
-| P5-03c1 | `in_progress` | P5-03b | validated snapshot handoff、temporary staging、`uv sync` adapter、adapter unit tests | readerで検証済みのproject/lock bytesだけをprivateなsnapshotとして標準名`pyproject.toml`/`uv.lock`へstagingし、`UV_PROJECT_ENVIRONMENT=<unique absolute temporary prefix>`、`uv sync --project <staged pyproject> --locked --no-install-project --no-default-groups`とselection由来の明示group/extra flagsだけで同期する。入力を再読・変更せず、`--lockfile`/`--frozen`/workspace metadataを使わない。wheel-only/allow-build policyを保持し、成功・失敗を問わずstagingとtargetをfinallyで削除する。CLI/README/real networkは含めない。 |
-| P5-03c2 | `todo` | P5-03c1 | CLI option/guard、analysis v3、baseline/comparison v2、budget/write boundary、CLI unit tests | explicit `--project`/`--lockfile`とselectionをCLIへ接続する。input/selection failureはexit 2/3、`uv sync`・inventory failure（stale lockを含む）はexit 1、comparison incompatibilityは4、budget violationは5に保ち、成功時だけ一つのtext/analysis JSON v3/comparison JSON v2をstdoutへ出す。raw path/content/source URL/credential、staging/target path、`uv` diagnosticを出力しない。v1/v2 analysisとcomparison v1のbytes、cross-kind rejection、baseline writeの既存atomicityを維持する。 |
+| P5-03c1 | `done` | P5-03b | validated snapshot handoff、temporary staging、`uv sync` adapter、adapter unit tests | readerで検証済みのproject/lock bytesだけをprivateなsnapshotとして標準名`pyproject.toml`/`uv.lock`へstagingし、`UV_PROJECT_ENVIRONMENT=<unique absolute temporary prefix>`、`uv sync --project <staging directory> --locked --no-install-project --no-default-groups`とselection由来の明示group/extra flagsだけで同期する。入力を再読・変更せず、`--lockfile`/`--frozen`/workspace metadataを使わない。wheel-only/allow-build policyを保持し、成功・失敗を問わずstagingとtargetをfinallyで削除する。CLI/README/real networkは含めない。 |
+| P5-03c2 | `in_progress` | P5-03c1 | CLI option/guard、analysis v3、baseline/comparison v2、budget/write boundary、CLI unit tests | explicit `--project`/`--lockfile`とselectionをCLIへ接続する。input/selection failureはexit 2/3、`uv sync`・inventory failure（stale lockを含む）はexit 1、comparison incompatibilityは4、budget violationは5に保ち、成功時だけ一つのtext/analysis JSON v3/comparison JSON v2をstdoutへ出す。raw path/content/source URL/credential、staging/target path、`uv` diagnosticを出力しない。v1/v2 analysisとcomparison v1のbytes、cross-kind rejection、baseline writeの既存atomicityを維持する。 |
 | P5-03c3 | `todo` | P5-03c2 | local-wheel E2E、README、全体回帰 | offline local wheelsと`--find-links`だけでlocked project selection、read-only original inputs、default-group非選択、explicit group/extra、temporary prefix inventory、stale lock cleanup、redaction、JSON/stdout/exit 0--5、lock-only diffの`lock_changed`、baseline/write/budgetを検証する。READMEへ実装済みのv3/v2 public contractとlocal root未測定の制約を記載し、full checkを記録する。 |
 
 P5-03b/P5-03cのschema・fixture方針:
@@ -970,7 +970,7 @@ P5-03b/P5-03cのschema・fixture方針:
 
 P5-03cの実行契約と初期スコープ:
 
-- 公開`uv`経路は、unique absolute temporary directory内のstaged `pyproject.toml`と隣接する`uv.lock`を`--project`へ渡し、`UV_PROJECT_ENVIRONMENT`を別のunique absolute temporary prefixに設定して実行する`uv sync --project <staged pyproject> --locked --no-install-project --no-default-groups`である。`--group`/`--all-groups`と`--extra`はreaderが検証したselectionからだけ明示追加する。`--lockfile` optionは使わず、stagingでlock filenameを固定する。`--frozen`はfreshnessを検査しないため使わない。
+- 公開`uv`経路は、unique absolute temporary directory内のstaging directory（標準名`pyproject.toml`と隣接する`uv.lock`を含む）を`--project`へ渡し、`UV_PROJECT_ENVIRONMENT`を別のunique absolute temporary prefixに設定して実行する`uv sync --project <staging directory> --locked --no-install-project --no-default-groups`である。`--group`/`--all-groups`と`--extra`はreaderが検証したselectionからだけ明示追加する。`--lockfile` optionは使わず、stagingでlock filenameを固定する。`--frozen`はfreshnessを検査しないため使わない。
 - readerからinstallerへのhandoffは、成功した安全読込時のvalidated project/lock bytesだけをprivate snapshotとして行う。original inputを再読しないため、検証したselectionと異なる後続内容を同期しない。snapshot、staging path、temporary prefix、command argument、raw TOML/source URL/credential/opaque IDはresult、baseline、diagnostic、test assertion failureに公開しない。original project/lockとその親directoryは作成・更新・削除しない。
 - `uv sync`はstale lock失敗時にも`UV_PROJECT_ENVIRONMENT`下にtarget骨組みを残し得る。staging directoryとtarget prefixは、success、`uv` failure、inventory failure、例外のすべてでfinally cleanupする。cleanup失敗もsanitized operational failureとして扱い、先行する`uv` failureをraw diagnosticで覆い隠さない。user指定inputや既存prefixをcleanup対象にしない。
 - staged rootはlock上の`source = { editable = "." }`であっても、`--no-install-project`によりinstallしない。local root packageはlock bytesだけから安全・再現可能に測定できず、root build codeの実行も避けるため、P5-03c初期対象ではない。結果はroot自身を測定済みと主張せず、root sizeを含めない。local path/VCS/workspace member sourceを含むrootまたはdependencyはreaderのsupported subset外としてexit 3で拒否する。
@@ -1107,7 +1107,7 @@ P5-03cの実行契約と初期スコープ:
 
 調査で確定した実行経路:
 
-- explicit project/lockをtemporary installへ適用する公開経路は、validated project/lock bytesをunique temporary staging directoryの標準名`pyproject.toml`/`uv.lock`へ配置し、`UV_PROJECT_ENVIRONMENT=<unique absolute temporary prefix>`と`uv sync --project <staged pyproject> --locked --no-install-project --no-default-groups`を用いる方法である。group/extraはreaderで検証済みのselectionから対応する明示flagだけを追加する。`--lockfile` optionは使わず、staged `pyproject.toml`に隣接した標準名`uv.lock`を用いる。`--frozen`はlock freshnessを検査しないため不可とする。
+- explicit project/lockをtemporary installへ適用する公開経路は、validated project/lock bytesをunique temporary staging directoryの標準名`pyproject.toml`/`uv.lock`へ配置し、そのstaging directoryを`--project`へ渡す`UV_PROJECT_ENVIRONMENT=<unique absolute temporary prefix>`と`uv sync --project <staging directory> --locked --no-install-project --no-default-groups`を用いる方法である。group/extraはreaderで検証済みのselectionから対応する明示flagだけを追加する。`--lockfile` optionは使わず、staging内の標準名`uv.lock`を用いる。`--frozen`はlock freshnessを検査しないため不可とする。
 - original project/lockは読み直さない。P5-03c1はsuccessful reader snapshotのbytesをinternal-onlyでhandoffし、そのsame bytesをstageして実行する。これにより、検証後のinput変更を別内容のinstallとして扱わない。input、親directory、ambient project/workspace stateは作成・更新・削除しない。raw bytes、path、source URL、credential、opaque ID、staging/target path、command、`uv` diagnosticsをpublic result/baseline/stdout/stderrへ含めない。
 - stale lockを含む`uv sync`失敗でもtarget prefixの骨組みが残り得る。stagingとtemporary prefixをsuccess、sync failure、inventory failure、unexpected exceptionのすべてでfinally cleanupする。cleanup failureはsanitized operational failureとして記録し、先行するfailureのraw diagnosticを出さない。user inputまたはexisting prefixをcleanup対象にしない。
 - root entryの`source = { editable = "." }`はstaged projectに残るが、`--no-install-project`によりrootをinstallしない。local root sizeはlock bytesだけでは再現できず、local build codeを実行し得るため初期P5-03cでは測定対象外である。local path/VCS/workspace dependency sourceはsupported subset外としてsafe rejectする。wheel-onlyを既定として維持し、source buildは`--allow-build`の明示opt-inだけにする。
@@ -1116,8 +1116,8 @@ P5-03cの実行契約と初期スコープ:
 
 | ID | 状態 | 範囲 | 完了条件 |
 |---|---|---|---|
-| P5-03c1 | `in_progress` | snapshot handoff、staging writer、temporary `uv sync` installer adapter、adapter unit tests | validated bytesだけを標準名でstageし、selection/policyを安全なargvへ投影する。freshnessは`--locked`で確認し、`--frozen`/`--lockfile`/workspace metadataを使わない。cleanup、input immutability、sanitized adapter failure、local root非installをnetwork不要のtest doubleで固定する。CLI、README、real `uv` E2Eは含めない。 |
-| P5-03c2 | `todo` | CLI/public boundaryと既存analysis/baseline/comparison/budget/writeとの接続 | option guardをexternal I/O前に実行し、exit 0--5、stdout one-document/text、redaction、cross-kind baseline rejection、v1/v2 analysisとcomparison v1 byte不変をCLI unit testで固定する。 |
+| P5-03c1 | `done` | snapshot handoff、staging writer、temporary `uv sync` installer adapter、adapter unit tests | validated bytesだけを標準名でstageし、selection/policyを安全なargvへ投影する。freshnessは`--locked`で確認し、`--frozen`/`--lockfile`/workspace metadataを使わない。cleanup、input immutability、sanitized adapter failure、local root非installをnetwork不要のtest doubleで固定する。CLI、README、real `uv` E2Eは含めない。 |
+| P5-03c2 | `in_progress` | CLI/public boundaryと既存analysis/baseline/comparison/budget/writeとの接続 | option guardをexternal I/O前に実行し、exit 0--5、stdout one-document/text、redaction、cross-kind baseline rejection、v1/v2 analysisとcomparison v1 byte不変をCLI unit testで固定する。 |
 | P5-03c3 | `todo` | offline local-wheel E2E、README、full verification | `--find-links`のみでreal `uv sync`のselection、temporary inventory、stale-lock cleanup、input immutability、write/budget/diff/lock_changedを確認し、実装済みpublic contractとlocal root未測定をREADMEへ反映する。 |
 
 P5-03c全体のDefinition of Done:
@@ -1130,6 +1130,36 @@ P5-03c全体のDefinition of Done:
 次のタスク:
 
 - P5-03c1: validated snapshotを唯一のstaging sourceとするtemporary installer bridgeを実装する。
+
+### 2026-08-08: P5-03c1 temporary installer bridge
+
+状態: `done`
+
+実装:
+
+- `project_lock_reader`の公開`ProjectLockSelection`は変更せず、同一の安全読込で検証済みのproject/lock bytesだけを保持する非公開snapshotを追加した。公開readerはsnapshotからsafe selectionだけを返すため、raw bytes、input path、source URL、credentialをpublic resultへ追加していない。
+- `project_lock_installer`に、非公開snapshotだけを受け取るtemporary bridgeを追加した。unique temporary root内の`stage/pyproject.toml`と`stage/uv.lock`へsnapshot bytesを配置し、`stage` directoryを`--project`へ渡して、別のabsolute temporary targetを`UV_PROJECT_ENVIRONMENT`へ設定する`uv sync --project <staging directory> --locked --no-install-project --no-default-groups`を起動する。review P1修正として、子processのenvironmentはambient `os.environ`を複製せず、PATH（Windowsではprocess起動に必要な最小OS変数も）だけから構築し、`UV_PROJECT_ENVIRONMENT`と`UV_NO_CONFIG=1`だけを明示する。従ってambient `UV_*`、`VIRTUAL_ENV`、index/source/build controls、外部configはselectionまたはbuild policyを上書きできず、staged `[tool.uv]`の一般設定もこのadapterのselection/build contractに影響しない。
+- argvは検証済みselection由来の`--group`/`--all-groups`/`--extra`とbuild policy由来のwheel-only `--no-build`だけを追加する。`--lockfile`、`--frozen`、workspace metadata、original inputの再読は行わず、isolated stageをcwdにする。root projectは`--no-install-project`により未install・未測定のままとする。
+- success、`uv sync` failure、inventory failure、unexpected exception、cleanup failureのすべてでtemporary rootをcleanupする。typed bridge errorにはreasonだけを保持し、raw path、command、`uv` diagnostics、credential-like exception textを反射しない。user inputとambient/existing prefixはcleanup対象にしない。
+
+テスト:
+
+- network-free test doubleで、same-read snapshot bytesのstandard-name staging、`uv`の`--project` directory contract、explicit/all groupとextra/build policy argv、`--locked`、`--no-install-project`、`--no-default-groups`、`--no-build`、`--lockfile`/`--frozen`非使用、isolated cwd、temporary cleanup、input/ambient prefix不変、sanitized failureを固定した。review P1の回帰として、`UV_PROJECT`、`UV_WORKING_DIR`、`UV_CONFIG_FILE`、`UV_NO_CONFIG=0`、index/source/build variables、active virtual environment、Pip/Python controls、および未知の`UV_*`を毒入れしても、子environmentはallowlistと強制した`UV_NO_CONFIG=1`だけであり、wheel-only/allow-build argvが明示policyのままになることを確認する。
+- artifact verifierの必須module集合に`project_lock_installer.py`を追加し、wheel/sdistのいずれにもbridge実装が含まれないbuildを拒否する回帰テストを追加した。
+- real `uv` E2E、CLI、READMEはP5-03c2/P5-03c3の範囲として未変更である。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked pytest tests/test_project_lock_reader.py tests/test_project_lock_installer.py -q` — 成功（51 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ruff format --check uv_packsize/project_lock_reader.py uv_packsize/project_lock_installer.py tests/test_project_lock_reader.py tests/test_project_lock_installer.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ruff check uv_packsize/project_lock_reader.py uv_packsize/project_lock_installer.py tests/test_project_lock_reader.py tests/test_project_lock_installer.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ty check uv_packsize/project_lock_reader.py uv_packsize/project_lock_installer.py tests/test_project_lock_reader.py tests/test_project_lock_installer.py` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-03c1-fix-cache uv run --locked pytest tests/test_project_lock_installer.py -q`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-03c1-fix-cache uv run --locked ruff format --check uv_packsize/project_lock_installer.py tests/test_project_lock_installer.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-03c1-fix-cache uv run --locked ruff check uv_packsize/project_lock_installer.py tests/test_project_lock_installer.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-03c1-fix-cache uv run --locked ty check uv_packsize/project_lock_installer.py tests/test_project_lock_installer.py` — 成功（10 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-artifact-cache uv run --locked pytest tests/test_verify_build.py -q`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-artifact-cache uv run --locked ruff format --check scripts/verify_build.py tests/test_verify_build.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-artifact-cache uv run --locked ruff check scripts/verify_build.py tests/test_verify_build.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-artifact-cache uv run --locked ty check scripts/verify_build.py tests/test_verify_build.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-artifact-cache make verify-build` — 成功（3 passed。wheel/sdistに`project_lock_installer.py`を含むことを確認）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-final-ci-cache make ci-check`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-final-test-cache make test`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-final-lock-cache uv lock --check` — 成功（全体: 845 passed, 2 skipped）。
+- `git diff --check` — 成功。
+
+次のタスク:
+
+- P5-03c2: CLI/public boundaryと既存analysis/baseline/comparison/budget/writeへinstaller bridgeを接続する。
 
 ### 2026-08-02: P4-04f CLI policy input/precedence implementation
 

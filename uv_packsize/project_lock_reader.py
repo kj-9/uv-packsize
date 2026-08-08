@@ -15,7 +15,7 @@ import io
 import os
 import stat
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from hashlib import sha256
 from importlib import import_module
@@ -158,6 +158,21 @@ class ProjectLockSelection:
     lock_identity: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ValidatedProjectLockSnapshot:
+    """Private same-read payload for the temporary installer bridge.
+
+    The public selection intentionally retains only safe, normalized metadata.
+    This private value is the sole handoff that retains the already-validated
+    input bytes, so staging never needs to read an original input a second
+    time.
+    """
+
+    selection: ProjectLockSelection
+    _project_bytes: bytes = field(repr=False)
+    _lock_bytes: bytes = field(repr=False)
+
+
 def read_project_lock(  # noqa: PLR0913
     project: Path,
     lockfile: Path,
@@ -174,14 +189,38 @@ def read_project_lock(  # noqa: PLR0913
     project discovery is part of this boundary.
     """
 
+    return _read_validated_project_lock(
+        project,
+        lockfile,
+        workspace_member=workspace_member,
+        dependency_groups=dependency_groups,
+        all_groups=all_groups,
+        extras=extras,
+    ).selection
+
+
+def _read_validated_project_lock(  # noqa: PLR0913
+    project: Path,
+    lockfile: Path,
+    *,
+    workspace_member: str | None = None,
+    dependency_groups: tuple[str, ...] = (),
+    all_groups: bool = False,
+    extras: tuple[str, ...] = (),
+) -> _ValidatedProjectLockSnapshot:
+    """Return a private, validated same-read snapshot for installation.
+
+    This is deliberately not part of the public reader contract.  The bridge
+    stages these bytes under standard filenames and must not reopen either
+    original path after validation.
+    """
+
     _require_exact_paths(project, lockfile)
     request = _selection_request(
         workspace_member, dependency_groups, all_groups, extras
     )
-    project_document = _parse(
-        _read_regular_snapshot(project, ProjectLockInputField.PROJECT_FILE),
-        ProjectLockInputField.PROJECT,
-    )
+    project_bytes = _read_regular_snapshot(project, ProjectLockInputField.PROJECT_FILE)
+    project_document = _parse(project_bytes, ProjectLockInputField.PROJECT)
     lock_bytes = _read_regular_snapshot(lockfile, ProjectLockInputField.LOCK_FILE)
     lock_document = _parse(lock_bytes, ProjectLockInputField.LOCK)
     root_name, project_groups, project_extras = _project_semantics(project_document)
@@ -225,13 +264,17 @@ def read_project_lock(  # noqa: PLR0913
         _fail(
             ProjectLockInputErrorReason.INVALID_SELECTION, ProjectLockInputField.EXTRA
         )
-    return ProjectLockSelection(
-        root_package=root_name,
-        workspace_member=selected_member,
-        dependency_group_selection=selection,
-        dependency_groups=selected_groups,
-        extras=selected_extras,
-        lock_identity=sha256(_LOCK_IDENTITY_DOMAIN + lock_bytes).hexdigest(),
+    return _ValidatedProjectLockSnapshot(
+        selection=ProjectLockSelection(
+            root_package=root_name,
+            workspace_member=selected_member,
+            dependency_group_selection=selection,
+            dependency_groups=selected_groups,
+            extras=selected_extras,
+            lock_identity=sha256(_LOCK_IDENTITY_DOMAIN + lock_bytes).hexdigest(),
+        ),
+        _project_bytes=project_bytes,
+        _lock_bytes=lock_bytes,
     )
 
 

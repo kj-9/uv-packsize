@@ -12,6 +12,9 @@ _verify_metadata = cast(
     Callable[[bytes, str], object],
     runpy.run_path(str(ROOT / "scripts/verify_build.py"))["_verify_metadata"],
 )
+CRITICAL_MODULES = cast(
+    set[str], runpy.run_path(str(ROOT / "scripts/verify_build.py"))["CRITICAL_MODULES"]
+)
 
 
 def metadata(*requirements: str) -> bytes:
@@ -54,7 +57,6 @@ def test_runtime_dependency_set_rejects_extras_and_duplicates():
             ),
             "artifact",
         )
-
     with pytest.raises(ValueError, match="unexpected Requires-Dist metadata"):
         _verify_metadata(
             metadata(
@@ -65,3 +67,7 @@ def test_runtime_dependency_set_rejects_extras_and_duplicates():
             ),
             "artifact",
         )
+
+
+def test_critical_modules_include_project_lock_installer():
+    assert "uv_packsize/project_lock_installer.py" in CRITICAL_MODULES

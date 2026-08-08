@@ -42,6 +42,7 @@ CRITICAL_MODULES = {
     "uv_packsize/root_contributions.py",
     "uv_packsize/root_contribution_render.py",
     "uv_packsize/project_lock_json_render.py",
+    "uv_packsize/project_lock_installer.py",
     "uv_packsize/project_lock_reader.py",
 }
 EXPECTED_RUNTIME_DEPENDENCIES = {
