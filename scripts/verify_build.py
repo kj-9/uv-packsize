@@ -13,7 +13,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 EXPECTED_NAME = "uv-packsize"
-EXPECTED_VERSION = "0.2.0a1"
+EXPECTED_VERSION = "0.2.0a2"
 EXPECTED_REQUIRES_PYTHON = ">=3.10"
 EXPECTED_ENTRY_POINT = "uv_packsize.cli:cli"
 WHEEL_DIST_INFO = f"uv_packsize-{EXPECTED_VERSION}.dist-info"

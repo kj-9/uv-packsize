@@ -16,7 +16,7 @@
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a1`へ更新中。公開操作は明示承認待ち。 |
+| αリリース準備 | `0.2.0a2`へ更新済み。公開操作は明示承認待ち。 |
 
 ## ステータス定義
 
@@ -906,9 +906,35 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ## 作業記録
 
-### 2026-08-09: `0.2.0a1` αリリース準備
+### 2026-08-09: `0.2.0a2` αリリース再準備
 
 状態: `done`（外部公開操作を除く）
+
+変更:
+
+- `0.2.0a1`のGitHub pre-releaseはCIで失敗し、PyPI publish前に停止した。既存tagを付け替えず欠番として残す。
+- 修正版を`0.2.0a2`として再公開する方針に従い、project metadata、lock root package、artifact verifier、およびversionを固定する回帰テストを同期した。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+uv build --no-sources --out-dir <temporary-directory>
+uv run --locked python scripts/verify_build.py <temporary-directory>
+git diff --check
+```
+
+結果:
+
+- lock check、format/lint/typecheck、README生成整合性、whitespace checkは成功した。
+- 全878テストが成功し、2件は既存skipだった。
+- temporary out directoryのwheelとsdistはName `uv-packsize`、Version `0.2.0a2`、metadata、archive構造、entry pointを検証した。
+
+### 2026-08-09: `0.2.0a1` αリリース初回準備
+
+状態: `superseded`（CI失敗によりpublish前に停止）
 
 変更:
 
@@ -934,6 +960,29 @@ git diff --check
 - lock check、Ruff format/lint、ty、README生成整合性、YAML parse、whitespace checkは成功した。
 - 全878テストが成功し、2件は既存skipだった。
 - temporary out directoryのwheelとsdistはName `uv-packsize`、Version `0.2.0a1`、metadata、archive構造、entry pointを検証した。
+
+### 2026-08-09: αリリースCIのpre-release policy同期
+
+状態: `done`
+
+変更:
+
+- CIの`uv lock --check`は、lockの`prerelease-mode = "disallow"`とuvの既定値`if-necessary-or-explicit`が異なるため、lockの再解決を試みて失敗した。
+- projectの`[tool.uv]`に`prerelease = "disallow"`を明示し、lockの解決policyをproject設定として固定した。lock root metadata testでprojectとlock双方の値を検証する。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+git diff --check
+```
+
+結果:
+
+- lock check、format/lint/typecheck、README生成整合性、whitespace checkは成功した。
+- 全878テストが成功し、2件は既存skipだった。
 
 ### 2026-08-02: P5-01 `uv workspace metadata` schema investigation and compatibility boundary
 

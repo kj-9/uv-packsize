@@ -1,6 +1,6 @@
 [project]
 name = "uv-packsize"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "report size of python package with its deps using uv"
 readme = "README.md"
 authors = [{name = "kj-9"}]
@@ -24,6 +24,9 @@ dependencies = [
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+prerelease = "disallow"
 
 [tool.setuptools.packages.find]
 include = ["uv_packsize*"]
