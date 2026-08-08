@@ -92,7 +92,7 @@ def _validate_payload(payload: bytes) -> None:
 def _features() -> None:
     required = (
         "open",
-        "stat",
+        "lstat",
         "fstat",
         "link",
         "unlink",
@@ -104,26 +104,24 @@ def _features() -> None:
     if (
         os.name != "posix"
         or not hasattr(os, "supports_dir_fd")
-        or not hasattr(os, "supports_follow_symlinks")
         or not all(hasattr(os, name) for name in required)
     ):
         _fail("unsupported-platform", "file")
     if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
         _fail("unsupported-platform", "file")
-    # ``supports_dir_fd`` and ``supports_follow_symlinks`` are the portable
-    # statements that descriptor-relative, no-follow ``stat`` is available.
-    # Do this before opening any user-controlled path.
-    if (
-        not {os.open, os.stat, os.link, os.unlink}.issubset(os.supports_dir_fd)
-        or os.stat not in os.supports_follow_symlinks
-    ):
+    # CPython 3.11 and 3.12 accept ``dir_fd`` for ``lstat`` on Linux even
+    # though they omit it from ``supports_dir_fd``.  Use ``lstat`` directly
+    # for the no-follow primitive rather than substituting ``stat`` based on
+    # that incomplete feature advertisement.  The remaining operations must
+    # be advertised before opening a user-controlled path.
+    if not {os.open, os.link, os.unlink}.issubset(os.supports_dir_fd):
         _fail("unsupported-platform", "file")
 
 
 def _lstat(path: str, *, dir_fd: int | None = None) -> os.stat_result:
-    """Return no-follow metadata through the explicitly checked stat APIs."""
+    """Return no-follow metadata through the native POSIX primitive."""
 
-    return os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+    return os.lstat(path, dir_fd=dir_fd)
 
 
 def _effective_uid() -> int:

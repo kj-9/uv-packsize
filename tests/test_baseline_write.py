@@ -198,28 +198,32 @@ def test_feature_gate_happens_before_open(tmp_path: Path, monkeypatch):
     assert captured.value.code == "unsupported-platform"
 
 
-def test_write_uses_checked_stat_when_lstat_dir_fd_is_not_advertised(
+def test_write_uses_lstat_when_lstat_dir_fd_is_not_advertised(
     tmp_path: Path, monkeypatch
 ):
-    """Older POSIX builds need not advertise lstat despite safe stat support."""
+    """Linux CPython 3.12 accepts this call despite omitting its capability."""
 
     payload = render_fresh_baseline(_result())
     supported = set(writer.os.supports_dir_fd)
     supported.discard(writer.os.lstat)
     monkeypatch.setattr(writer.os, "supports_dir_fd", supported)
 
-    def fail_lstat(*args: object, **kwargs: object) -> os.stat_result:
-        raise AssertionError("the writer must use checked stat(..., no-follow)")
+    def fail_stat(*args: object, **kwargs: object) -> os.stat_result:
+        raise AssertionError("the writer must use lstat(..., dir_fd=...)")
 
-    monkeypatch.setattr(writer.os, "lstat", fail_lstat)
+    monkeypatch.setattr(writer.os, "stat", fail_stat)
     target = _target()
     write_baseline(target, payload)
     assert target.read_bytes() == payload
 
 
-def test_feature_gate_requires_stat_nofollow_before_open(tmp_path: Path, monkeypatch):
+def test_feature_gate_requires_core_dir_fd_operations_before_open(
+    tmp_path: Path, monkeypatch
+):
     payload = render_fresh_baseline(_result())
-    monkeypatch.setattr(writer.os, "supports_follow_symlinks", set())
+    supported = set(writer.os.supports_dir_fd)
+    supported.discard(writer.os.open)
+    monkeypatch.setattr(writer.os, "supports_dir_fd", supported)
 
     def fail_open(*args: object, **kwargs: object) -> int:
         raise AssertionError("must not open before feature gate")

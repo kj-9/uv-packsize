@@ -16,7 +16,7 @@
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a3`へ更新済み。公開操作は明示承認待ち。 |
+| αリリース準備 | `0.2.0a4`へ更新済み。公開操作は明示承認待ち。 |
 
 ## ステータス定義
 
@@ -906,9 +906,35 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ## 作業記録
 
-### 2026-08-09: `0.2.0a3` αリリース再準備
+### 2026-08-09: `0.2.0a4` αリリース再準備
 
 状態: `done`（外部公開操作を除く）
+
+変更:
+
+- `0.2.0a3`のGitHub pre-releaseはPython 3.12のbaseline writer `changed-parent` failureによりCIで停止し、PyPI publishは実行されなかった。既存tagを付け替えず欠番として残す。
+- 修正版を`0.2.0a4`として再公開する方針に従い、project metadata、lock root package、artifact verifier、およびversionを固定する回帰テストを同期した。
+
+検証:
+
+```bash
+uv lock --check
+make ci-check
+make test
+uv build --no-sources --out-dir <temporary-directory>
+uv run --locked python scripts/verify_build.py <temporary-directory>
+git diff --check
+```
+
+結果:
+
+- lock check、format/lint/typecheck、README生成整合性、whitespace checkは成功した。
+- 全880テストが成功し、2件は既存skipだった。
+- temporary out directoryのwheelとsdistはName `uv-packsize`、Version `0.2.0a4`、metadata、archive構造、entry pointを検証した。
+
+### 2026-08-09: `0.2.0a3` αリリース再準備
+
+状態: `superseded`（Python 3.12 baseline writer `changed-parent` failureによりpublish前に停止）
 
 変更:
 
@@ -946,6 +972,26 @@ git diff --check
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-baseline-linux-fix-cache make ci-check` — 成功。
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-baseline-linux-fix-cache make test` — 880 passed, 2 skipped。
 - `git diff --check` — 成功。
+
+### 2026-08-09: αリリース blocker — CPython 3.12 parent identity regression
+
+状態: `done`（外部公開操作を除く）
+
+原因と判断:
+
+- `v0.2.0a3`のGitHub Actions（Ubuntu `/usr/bin/python3.12`、CPython 3.12.3）では、absolute `/tmp/.../baseline.json` のwriteで`_open_parent()`が`changed-parent`となった。fresh baseline、project-lock baseline、CLI doubleを含む6件が同じatomic writer failureで失敗した。
+- Linux CPython 3.11/3.12では、`os.lstat(path, dir_fd=fd)`が実際に動作する一方、`os.lstat`は`os.supports_dir_fd`に含まれない。`supports_dir_fd`だけをこのno-follow primitiveの可否根拠にせず、native `lstat`を使う必要がある。
+- a3で導入した`os.stat(..., dir_fd=fd, follow_symlinks=False)`への置換は、同じno-follow目的でも上記runnerでparent identity照合を通さなかった。atomicity/TOCTOU保証を弱めるfallbackは採用せず、`lstat`へ戻して`open`/`link`/`unlink`だけをadvertised `dir_fd` operationとしてopen前に検査する最小修正とした。parent/target/tempのsymlink拒否、device/inode identity照合、atomic publish、failure recoveryは維持する。
+
+テスト:
+
+- `lstat`が`supports_dir_fd`に広告されないLinux CPython 3.12相当でも、writerが`lstat(..., dir_fd=...)`を使って成功する回帰を追加した。core `dir_fd` operationが未広告ならopen前に拒否する回帰も維持した。
+- Linux Docker CPython 3.11.15、3.12.3、3.13.14、3.14.7で、`tests/test_baseline_write.py`、fresh local-wheel baseline write、project-lock baseline writeを実行し、各19 passed。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-a3-baseline-cache UV_PROJECT_ENVIRONMENT=/private/tmp/uv-packsize-a3-baseline-venv make test` — 880 passed, 2 skipped。
+- 同じisolated environmentで`make ci-check`、`uv lock --check`、`git diff --check` — 成功。
 
 ### 2026-08-09: `0.2.0a2` αリリース再準備
 

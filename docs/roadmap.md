@@ -9,11 +9,12 @@
 Phase 2〜6で追加した測定inventory、versioned JSON、baseline/budget、locked
 project analysisは、公開済みの`0.1.1`から機能範囲が大きく広がる。最初の先行
 `0.2.0a1`はGitHub pre-releaseでCIがpublish前に失敗したため、tagを付け替えず
-欠番として残す。`0.2.0a2`もLinuxでbaseline writerのCI failureによりPyPI
-publish前に停止した。修正版の公開候補はPEP 440の`0.2.0a3`とし、安定版`0.2.0`
-を約束するものではない。
+欠番として残す。`0.2.0a2`はLinux baseline writer failure、`0.2.0a3`はPython
+3.12のbaseline writer changed-parent failureにより、いずれもPyPI publish前に
+停止した。修正版の公開候補はPEP 440の`0.2.0a4`とし、安定版`0.2.0`を約束する
+ものではない。
 
-公開は`v0.2.0a3`のGitHub Release作成を契機とする。publish workflowはその
+公開は`v0.2.0a4`のGitHub Release作成を契機とする。publish workflowはその
 release tagをcheckoutし、tag・checkout SHA・`pyproject.toml`のversionの一致、
 lock、静的検査、対応Python全テスト、artifact検証を通過した場合だけPyPIへ
 trusted publishingで送る。tag、release、publishはリリース担当者が明示的に
