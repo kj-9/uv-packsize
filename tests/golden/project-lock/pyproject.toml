@@ -1,0 +1,8 @@
+[project]
+name = "Example_Project"
+
+[project.optional-dependencies]
+speed = []
+
+[dependency-groups]
+test = []

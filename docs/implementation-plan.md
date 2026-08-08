@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-08-02
+最終更新: 2026-08-08
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -10,10 +10,10 @@
 |---|---|
 | 現在のPhase | Phase 5: project/lockと比較分析（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | P5-03b: explicit `--project`/`--lockfile`の限定的な直接`uv.lock` readerを実装する |
+| 次のタスク | P5-03cのexternal blocker（explicit project/lockをtemporary installへ安全に適用する公開`uv`契約）を再確認する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
-| Blocker | P5-03c: explicit project/lockをtemporary installへ安全に適用する`uv`の公開・検証可能な経路待ち。P5-03bは開始可能 |
+| Blocker | P5-03c: explicit project/lockをtemporary installへ安全に適用する`uv`の公開・検証可能な経路待ち |
 | 次の成果物 | allowlistした`uv.lock` schemaを読む限定 readerとnetwork-free fixture |
 
 ## ステータス定義
@@ -248,7 +248,7 @@ Phase 1完了時に詳細分解する。現時点の入口は以下とする。
 | P5-01 | Phase 5 | `uv workspace metadata`の対応schemaを調査・固定する | `done` |
 | P5-02 | Phase 5 | project/lock analysis input/context contractを設計する | `done` |
 | P5-03a | Phase 5 | project/lock context、schema、baseline/comparison projectionをpureに実装する | `done` |
-| P5-03b | Phase 5 | stableな上流schemaだけを読むproject/lock metadata adapterを実装する | `blocked` |
+| P5-03b | Phase 5 | stableな上流schemaだけを読むproject/lock metadata adapterを実装する | `done` |
 | P5-03c | Phase 5 | project/lock analysisをinstaller、CLI、README、local E2Eへ接続する | `blocked` |
 | P6-01 | Phase 6 | 上流連携の費用対効果を再評価する | `todo` |
 
@@ -1009,6 +1009,89 @@ P5-03cのblocker:
 - P5-03bの上流stable metadata schema待ちは解除し、P5-02で固定したexplicit `--project`/`--lockfile` input contractに限定した直接`uv.lock` readerへ置き換える。P5-03aの`ProjectLockContext`、analysis JSON v3、baseline/comparison JSON v2、compatibility coreと`lock_changed`のpure contractは変更しない。
 - readerは`uv.lock` format全体の汎用実装ではない。`version = 1`かつ`revision = 3`と、root/member/group/extra selectionに必要なfield subsetだけを明示allowlistし、未知schema、未知の必須semantic、曖昧なselectionを受理しない。未対応入力を新しい互換入力と見なしたり、raw TOMLから補完したりしない。
 - P5-03bは明示inputのread-only readerまでを扱う`todo`とする。installer/CLI接続のP5-03cは、既存projectを変更せずtemporary installationへlockを適用する`uv`の公開・検証可能な経路が未確立なため`blocked`を維持する。どちらも`uv workspace metadata`を起動・parse・fixture化しない。
+
+### 2026-08-02: P5-03b explicit project/lock direct reader
+
+状態: `done`
+
+実装:
+
+- `uv_packsize/project_lock_reader.py`に、明示されたnative `Path`の`pyproject.toml`と`uv.lock`をそれぞれ一度だけread-onlyで読むadapterを追加した。symlink/special fileを拒否し、open前`lstat`とopen後`fstat`のdevice/inode照合、nonblocking bounded read、UTF-8/TOML失敗のtyped safe failureを固定した。raw path、TOML、OS diagnosticはerror/resultに保持しない。
+- readerは`uv.lock`の`version = 1`と`revision = 3`だけを受理し、必要なproject root package、package source、dependency group、optional extraのsubsetを検証する。project/lock top-level、project/package table、root dependency entryはclosed key allowlistであり、root entryは`source = { editable = "." }`、non-root entryはsingle known keyのnon-empty string `registry` sourceだけを受ける。未知・欠損field、未知source、重複package、project/lockのgroup/extra不一致、未知/重複selectionを推測せず拒否する。
+- 読み込み時はleafだけでなく全parent componentのsymlinkを拒否し、open前`lstat`、open後`fstat`、read後の`fstat`/`lstat`でdevice/inode/mode/size/mtime/ctimeを照合する。これにより観測可能な同一inode in-place rewriteも拒否するが、同一descriptorのimmutable snapshotを作るものではない。最終照合後の変更やmetadataを保持した攻撃的な並行書換えまでは防げないため、stableなtrusted directoryの明示inputだけを対象にする。
+- 成功結果はPEP 503正規化済みのroot/member/group/extra selectionと、`uv-packsize/project-lock/v1\\0lock\\0`でdomain-separateしたlock bytesのSHA-256 fingerprintだけを返す。workspace metadata、CLI、`uv`実行、network、installer接続は追加していない。analysis JSON v1/v2とcomparison JSON v1は変更していない。
+- network-freeの最小project/lock fixtureとunit testsを追加し、acceptance、all-groups effective set、root/member/group/extra validation、unknown/incomplete top-level/package/root-dependency schema、root editable path、non-root source、secret-like raw TOMLのredaction、leaf/parent symlink・special file、open前後のfile replacementとread後に観測できるsame-inode rewriteを固定した。build verifierは新reader moduleのwheel/sdist含有を要求する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked pytest tests/test_project_lock_reader.py tests/test_project_lock_projection.py tests/test_verify_build.py -q` — 成功（38 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make test` — 成功（818 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。
+
+次のタスク:
+
+- P5-03cはblockedのままとする。explicit project/lockを既存projectへ書き込まず、temporary installへ再現可能に適用できる`uv`の公開・検証可能な経路が確認できるまで、CLI/installer/READMEへ接続しない。
+
+### 2026-08-08: P5-03b input hardening
+
+状態: `done`
+
+変更:
+
+- readerのsupported subsetを実装でもclosedにした。`pyproject.toml`/`uv.lock` top-level、project/package table、root lock dependency entryのunknown fieldを拒否し、必要なfield欠損も拒否する。rootはexactな`source = { editable = "." }`だけ、non-rootはsingle-keyかつnon-empty exact stringの`registry` sourceだけを受理する。
+- project/lockのpathはleafだけでなく全parent componentのsymlinkを拒否する。read前の`lstat`、open後とread後の`fstat`、read後の`lstat`でdevice/inode/mode/size/mtime/ctimeを照合し、観測可能なsame-inode in-place rewriteを`changed-file`として拒否する。
+- descriptor上のimmutable snapshotは作らない。最終metadata照合後の変更やmetadataを意図的に保持する並行書換えは防げない残余制約として、roadmapとともに明記した。explicit inputはstableなtrusted directoryに置く。
+
+テスト:
+
+- unknown/incomplete project・lock top-level/package/root-dependency schema、root editable value、non-root source key、secret-like raw input非反射、parent symlink、read後same-inode rewriteをnetwork-free regression testで固定した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked pytest tests/test_project_lock_reader.py tests/test_project_lock_projection.py tests/test_verify_build.py -q`、`uv run --locked ty check` — 成功（49 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make ci-check` — 成功（Ruff format/lint、ty、README生成整合性）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache make test` — 成功（829 passed, 2 skipped）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv lock --check`、`make build`、`uv run --locked python scripts/verify_build.py dist`、`git diff --check` — 成功。buildはsandbox外cacheではなくtask-local `UV_CACHE_DIR`を指定した。
+
+### 2026-08-08: P5-03b 実project input互換性の修正
+
+状態: `done`
+
+変更:
+
+- readerのclosed allowlistを、実際のPEP 621 project shapeに広げた。root name、optional dependency group、dependency groupだけを読み、既知の非selection project metadata、standardな`[build-system]`、`[tool]` tableはtable shapeを検証して無視する。`dynamic = ["optional-dependencies"]`はselectable extraをfileから確定できないため拒否する。
+- `uv.lock` `version = 1` / `revision = 3`の既知top-level context（`requires-python`、`options.prerelease-mode`）、non-root package dependency/artifact record、root package metadataを明示allowlistした。URL、hash、artifact metadataはresultへ保持せず、unknown keyは拒否する。root metadataが`requires-dev`または`provides-extras`を持つ場合はroot dependency group/extraと一致することを確認する。
+- root editable `.`、non-root registry source、selection validation、raw input non-reflection、symlinkおよびTOCTOU hardeningは変更していない。公開CLIはまだ存在しないためREADMEの公開CLI契約は変更していない。
+
+テスト:
+
+- network-free minimal fixtureをv1/revision 3 context込みのshapeへ更新した。repository自身の`pyproject.toml`/`uv.lock`をexplicit pathで読むacceptanceを追加し、`all_groups`が`dev`を返すことを固定した。
+- dynamic extras、unknown build-system key、unknown lock option、root metadataとroot groupの不一致をsafe typed failureとして固定した。
+
+検証:
+
+- `uv run --locked pytest tests/test_project_lock_reader.py -q` — 成功（38 passed）。
+- `uv run --locked ruff format --check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py`、`uv run --locked ruff check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py`、`uv run --locked ty check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py` — 成功。
+
+### 2026-08-08: P5-03b default dependency group selection guard
+
+状態: `done`
+
+変更:
+
+- `[tool.uv]`の`default-groups`は、`uv run`/`uv sync`時の暗黙dependency group選択を変える。explicit readerのselection APIはcallerが指定した`none`/explicit/`all`だけを表すため、値を解釈・補完せず、存在自体を`invalid-project`/`dependency-group`のtyped safe failureとして拒否する。
+- `default-groups = ["..."]`と`default-groups = "all"`の両方を拒否する。`tool.uv.dev-dependencies`はdev groupのrequirements内容を補うlegacy設定であり、groupを選択する設定ではないため、この修正だけを理由に拒否対象へ広げない。`tool.uv.dependency-groups`もgroupのPython制約であってselectionではない。
+- `tool.uv`全体をclosed allowlistにはしない。readerがselectionへ影響しない一般設定（`managed`など）を読むだけで拒否しない一方、tool/uv tableのshape不正は従来どおりsafe failureとする。
+
+テスト:
+
+- network-free regressionで`default-groups`のlist/`"all"`入力が`ProjectLockInputError`になること、secret-like raw TOMLがerror textへ反射しないこと、無関係な`tool.uv.managed`がaccepted subsetを壊さないことを固定した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked pytest tests/test_project_lock_reader.py -q` — 成功（41 passed）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ruff format --check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ruff check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py`、`UV_CACHE_DIR=/private/tmp/uv-packsize-p5-cache uv run --locked ty check uv_packsize/project_lock_reader.py tests/test_project_lock_reader.py` — 成功。
 
 ### 2026-08-02: P4-04f CLI policy input/precedence implementation
 

@@ -1,0 +1,27 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[options]
+prerelease-mode = "disallow"
+
+[[package]]
+name = "example-project"
+version = "1.0.0"
+source = { editable = "." }
+
+[package.optional-dependencies]
+speed = [{ name = "speed-dep" }]
+
+[package.dev-dependencies]
+test = [{ name = "test-dep" }]
+
+[[package]]
+name = "speed-dep"
+version = "1.0.0"
+source = { registry = "https://index.example.invalid/simple" }
+
+[[package]]
+name = "test-dep"
+version = "1.0.0"
+source = { registry = "https://index.example.invalid/simple" }

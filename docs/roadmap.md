@@ -213,7 +213,7 @@ distributionごとの合計だけではなく、ファイル単位で次を保�
 
 任意のrequirementsをインストールするモードでは、インストール済みCore Metadataの`Requires-Dist`とenvironment markersからグラフを構築する。
 
-uvプロジェクトやlockfileを分析するモードでは、明示された`--project`と`--lockfile`だけを読む限定的な直接`uv.lock` readerを用いる。readerは、このプロジェクトが検証したlock formatの`version`/`revision`組合せと、その用途に必要な閉じたfield subsetだけをallowlistで受ける。未知・欠損・不正なschema、未知の必須semantic、曖昧なpackage/selectionは推測やpartial graphへのfallbackをせず拒否する。readerはworkspace metadataを起動・入力・補完に使わず、raw TOML、path、source URL、credential、opaque IDを公開result、baseline、利用者向けdiagnosticへ出力しない。
+uvプロジェクトやlockfileを分析するモードでは、明示された`--project`と`--lockfile`だけを読む限定的な直接`uv.lock` readerを用いる。readerは、このプロジェクトが検証したlock formatの`version`/`revision`組合せと、その用途に必要な閉じたfield subsetだけをallowlistで受ける。PEP 621の非selection project field、標準`[build-system]`/`[tool]` table、v1/revision 3のlock contextとartifact recordは、既知のtable/field shapeを検証してから無視する。ただし`[tool.uv]`の`default-groups`は暗黙のdependency group選択を変えるため、readerの明示selectionと混同せず安全に拒否する。他の`tool.uv`設定を一般的に拒否して互換範囲を恣意的に狭めない。一方、root name、dependency group、extra、dynamic extra、root metadataのgroup/extra整合などselectionへ影響するsemanticは明示的に検証し、未知・欠損・不正なschema、未知の必須semantic、曖昧なpackage/selectionは推測やpartial graphへのfallbackをせず拒否する。入力fileはleafだけでなく全parent componentのsymlinkを拒否し、bounded readの前後でdevice/inode/mode/size/mtime/ctimeを再照合する。ただし、同一descriptor上の内容をimmutable snapshotにするものではないため、入力は安定したtrusted directoryに置く。readerはworkspace metadataを起動・入力・補完に使わず、raw TOML、path、source URL、credential、opaque IDを公開result、baseline、利用者向けdiagnosticへ出力しない。
 
 [`uv workspace metadata`](https://docs.astral.sh/uv/reference/internals/metadata/)は別の将来adapter候補として隔離する。P5-01で確認した`uv 0.11.3`の`schema.version: "preview"`は通常CLI、baseline、CI比較の入力として常に非対応である。将来追加する場合も、上流がnumericかつstableと宣言したschema versionを出力し、このプロジェクトが明示的に支持してからに限る。
 
