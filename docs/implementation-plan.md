@@ -906,6 +906,28 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ## 作業記録
 
+### 2026-08-09: αリリース blocker — absolute temporary parent trust traversal
+
+状態: `done`（外部公開操作を除く）
+
+原因と判断:
+
+- GitHub ActionsのPython 3.12でabsolute temporary targetを開く際、`/tmp`のようなforeign sticky intermediate directoryを最終parentと同じstrict trust policyで判定していた。そのため、symlink拒否とdescriptor identity照合が成功しても`changed-parent`へ誤って正規化されていた。
+- 全ancestorで`lstat`、`O_NOFOLLOW`、device/inode照合を維持しつつ、中間componentだけは従来trustedなdirectoryに加えてsticky directoryを通過可能とした。実際に書き込む最終parentは従来どおりstrict policyを要求する。identity/type failureは`changed-parent`、trust failureは`unsafe-parent`として分離した。
+
+テスト:
+
+- foreign sticky intermediate traversalの成功、foreign writable non-sticky directoryの拒否、strictでない最終parentの`unsafe-parent`、absolute temporary targetの成功をunit testで固定した。
+- Python 3.12でbaseline writer unit testを実行し、GitHub Actionsの対象versionと同じ経路を確認した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv run --locked --python 3.12 pytest tests/test_baseline_write.py -q` — 18 passed。
+- `docker run --rm -v <repository>:/work -w /work ghcr.io/astral-sh/uv:python3.12-bookworm-slim uv run --locked --python 3.12 pytest tests/test_baseline_write.py -q` — 18 passed（Linux `/tmp` sticky ancestor）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache make test` — 881 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-ci-cache uv lock --check`、`git diff --check` — 成功。
+
 ### 2026-08-09: `0.2.0a4` αリリース再準備
 
 状態: `done`（外部公開操作を除く）

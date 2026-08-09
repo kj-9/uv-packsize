@@ -167,6 +167,12 @@ def _trusted_parent(item: os.stat_result, uid: int) -> bool:
     return item.st_uid == uid and bool(item.st_mode & stat.S_ISVTX)
 
 
+def _trusted_ancestor(item: os.stat_result, uid: int) -> bool:
+    """Allow a sticky directory only while traversing to a strict parent."""
+
+    return _trusted_parent(item, uid) or bool(item.st_mode & stat.S_ISVTX)
+
+
 def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
     absolute, parents, name = _parts(path)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -183,7 +189,7 @@ def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
             _fail("changed-parent", "file")
         if not _trusted_parent(opened, uid):
             _fail("unsafe-parent", "file")
-        for component in parents:
+        for index, component in enumerate(parents):
             before = _lstat(component, dir_fd=fd)
             if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
                 _fail("unsafe-parent", "file")
@@ -191,18 +197,24 @@ def _open_parent(path: Path, uid: int) -> tuple[int, str]:  # noqa: PLR0912
             try:
                 child = os.open(component, flags, dir_fd=fd)
                 opened = os.fstat(child)
-                valid = (
-                    stat.S_ISDIR(opened.st_mode)
-                    and (before.st_dev, before.st_ino) == (opened.st_dev, opened.st_ino)
-                    and _trusted_parent(opened, uid)
-                )
             except (OSError, TypeError, NotImplementedError, AttributeError):
                 if child is not None:
                     _safe_close(child)
                 _fail("parent-unavailable", "file")
-            if not valid:
+            if not stat.S_ISDIR(opened.st_mode) or (before.st_dev, before.st_ino) != (
+                opened.st_dev,
+                opened.st_ino,
+            ):
                 _safe_close(child)
                 _fail("changed-parent", "file")
+            trusted = (
+                _trusted_parent(opened, uid)
+                if index == len(parents) - 1
+                else _trusted_ancestor(opened, uid)
+            )
+            if not trusted:
+                _safe_close(child)
+                _fail("unsafe-parent", "file")
             _safe_close(fd)
             fd = child
         return fd, name

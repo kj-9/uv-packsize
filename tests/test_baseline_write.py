@@ -27,8 +27,6 @@ from uv_packsize.models import (
     ResolutionContext,
 )
 
-_PROJECT_ROOT = Path(__file__).parents[1]
-
 
 def _result() -> AnalysisResult:
     return AnalysisResult(
@@ -237,6 +235,7 @@ def test_feature_gate_requires_core_dir_fd_operations_before_open(
 def test_parent_trust_allows_nonwritable_foreign_anchor_but_rejects_foreign_writable():
     foreign_sticky = SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o1777)
     foreign_readonly = SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o755)
+    foreign_writable = SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o777)
     own_private = SimpleNamespace(st_uid=os.getuid(), st_mode=0o700)
     assert (
         writer._trusted_parent(cast(os.stat_result, foreign_sticky), os.getuid())
@@ -249,16 +248,58 @@ def test_parent_trust_allows_nonwritable_foreign_anchor_but_rejects_foreign_writ
     assert (
         writer._trusted_parent(cast(os.stat_result, own_private), os.getuid()) is True
     )
+    assert (
+        writer._trusted_ancestor(cast(os.stat_result, foreign_sticky), os.getuid())
+        is True
+    )
+    assert (
+        writer._trusted_ancestor(cast(os.stat_result, foreign_writable), os.getuid())
+        is False
+    )
 
 
-def test_absolute_target_under_nonwritable_foreign_anchors_succeeds():
+@pytest.mark.skipif(os.name != "posix", reason="dir_fd contract is POSIX-specific")
+def test_write_allows_foreign_sticky_intermediate_but_not_final_parent(
+    tmp_path: Path, monkeypatch
+):
     payload = render_fresh_baseline(_result())
-    target = _PROJECT_ROOT / ".baseline-write-absolute-test.json"
-    try:
-        write_baseline(target, payload)
-        assert target.read_bytes() == payload
-    finally:
-        target.unlink(missing_ok=True)
+    intermediate = tmp_path / "intermediate"
+    final_parent = intermediate / "final"
+    intermediate.mkdir()
+    intermediate.chmod(0o1777)
+    final_parent.mkdir()
+    final_parent.chmod(0o700)
+    intermediate_identity = intermediate.stat().st_dev, intermediate.stat().st_ino
+    original_trust = writer._trusted_parent
+
+    def foreign_sticky_trust(item: os.stat_result, uid: int) -> bool:
+        if (item.st_dev, item.st_ino) == intermediate_identity:
+            return False
+        return original_trust(item, uid)
+
+    monkeypatch.setattr(writer, "_trusted_parent", foreign_sticky_trust)
+    target = final_parent / "baseline.json"
+    write_baseline(target, payload)
+    assert target.read_bytes() == payload
+
+    final_identity = final_parent.stat().st_dev, final_parent.stat().st_ino
+
+    def untrusted_final_parent(item: os.stat_result, uid: int) -> bool:
+        if (item.st_dev, item.st_ino) == final_identity:
+            return False
+        return original_trust(item, uid)
+
+    monkeypatch.setattr(writer, "_trusted_parent", untrusted_final_parent)
+    with pytest.raises(BaselineWriteError) as captured:
+        write_baseline(final_parent / "other.json", payload)
+    assert captured.value.code == "unsafe-parent"
+
+
+def test_absolute_target_under_tmp_ancestor_succeeds(tmp_path: Path):
+    payload = render_fresh_baseline(_result())
+    target = tmp_path / ".baseline-write-absolute-test.json"
+    write_baseline(target, payload)
+    assert target.read_bytes() == payload
 
 
 def test_replace_feature_failure_is_sanitized_and_preserves_old_target(
