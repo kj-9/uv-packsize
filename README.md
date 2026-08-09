@@ -4,16 +4,26 @@
 [![Changelog](https://img.shields.io/github/v/release/kj-9/uv-packsize?include_prereleases&label=changelog)](https://github.com/kj-9/uv-packsize/releases)
 [![Tests](https://github.com/kj-9/uv-packsize/actions/workflows/ci.yml/badge.svg)](https://github.com/kj-9/uv-packsize/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/kj-9/uv-packsize/blob/master/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-222222.svg)](https://kj-9.github.io/uv-packsize/)
 
 report size of python package with its deps using uv
 
 ## Installation
 
-Install this tool using `pip`:
+Run it once with `uv`—no separate installation needed:
+
 ```bash
-pip install uv-packsize
+uvx uv-packsize requests
 ```
-or using `uv`:
+
+To keep it installed for repeated use:
+
+```bash
+uv tool install uv-packsize
+```
+
+`pip install uv-packsize` works too. See the [user documentation](https://kj-9.github.io/uv-packsize/)
+for quick starts, locked-project analysis, and CI budget examples.
 ```bash
 uv tool install uv-packsize
 ```

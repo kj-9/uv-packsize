@@ -21,7 +21,7 @@ def metadata(*requirements: str) -> bytes:
     headers = [
         "Metadata-Version: 2.4",
         "Name: uv-packsize",
-        "Version: 0.2.0a4",
+        "Version: 0.2.0a5",
         "Requires-Python: >=3.10",
         *(f"Requires-Dist: {requirement}" for requirement in requirements),
         "",

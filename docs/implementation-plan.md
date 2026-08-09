@@ -8,15 +8,15 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 6: エコシステム連携（`done`） |
-| `in_progress` | なし |
-| 次のタスク | αリリースの外部公開判断待ち |
+| 現在のPhase | αリリースと利用者向けDocs公開（`in_progress`） |
+| `in_progress` | `0.2.0a5` α公開とGitHub Pages Docsのdeploy |
+| 次のタスク | publish workflowとPages workflowの外部実行結果を確認する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a4`へ更新済み。公開操作は明示承認待ち。 |
+| αリリース準備 | `0.2.0a5`とPages Docsを準備済み。通常CIを通してから公開する。 |
 
 ## ステータス定義
 
@@ -905,6 +905,26 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-09: `0.2.0a5` αリリースとGitHub Pages Docs準備
+
+状態: `in_progress`（GitHub上のdeploy/publish実行待ち）
+
+変更:
+
+- `v0.2.0a4`は既存tagのため上書きせず、baseline writer修正と利用者向けDocsを含む次のPEP 440 pre-releaseを`0.2.0a5`とした。
+- `docs/site/`に静的な利用者向けDocsを追加した。最短の`uvx uv-packsize requests`、反復利用向け`uv tool install`、JSON、locked project analysis、CI budgetと安全境界を案内する。
+- `pages.yml`は`docs/site`だけをartifactにし、`contents: read`、`pages: write`、`id-token: write`の最小権限でGitHub Pagesへdeployする。PRではdeployせず、`main`へのDocs/workflow変更と手動実行だけを対象にする。
+- READMEの導入も`uvx uv-packsize requests`を先頭にし、Pages Docsへリンクした。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-pages-cache uv run --locked pytest tests/test_pages_docs.py tests/test_uv_packsize.py tests/test_verify_build.py -q` — 119 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-pages-cache make ci-check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-pages-cache make test` — 883 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-pages-cache uv lock --check` — 成功。
+- 一意なtemporary output directoryで`uv build --no-sources --out-dir <temporary-directory>`と`uv run --locked python scripts/verify_build.py <temporary-directory>` — `0.2.0a5` wheel/sdistを検証。
+- Ruby YAML parseと`git diff --check` — 成功。
 
 ### 2026-08-09: αリリース blocker — absolute temporary parent trust traversal
 
