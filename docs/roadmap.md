@@ -12,10 +12,10 @@ project analysisは、公開済みの`0.1.1`から機能範囲が大きく広が
 欠番として残す。`0.2.0a2`はLinux baseline writer failure、`0.2.0a3`はPython
 3.12のbaseline writer changed-parent failureにより、いずれもPyPI publish前に
 停止した。`0.2.0a4`もbaseline writer failureによりPyPI publish前に停止したため、
-既存tagを付け替えず欠番として残す。修正版の公開候補はPEP 440の`0.2.0a5`とし、安定版`0.2.0`を約束する
-ものではない。
+既存tagを付け替えず欠番として残す。修正版のPEP 440 pre-release`0.2.0a5`は
+GitHub pre-releaseとPyPIへ公開済みであり、安定版`0.2.0`を約束するものではない。
 
-公開は`v0.2.0a5`のGitHub Release作成を契機とする。publish workflowはその
+公開は`v0.2.0a5`のGitHub Release作成を契機とした。publish workflowはその
 release tagをcheckoutし、tag・checkout SHA・`pyproject.toml`のversionの一致、
 lock、静的検査、対応Python全テスト、artifact検証を通過した場合だけPyPIへ
 trusted publishingで送る。tag、release、publishはリリース担当者が明示的に

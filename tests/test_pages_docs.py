@@ -25,6 +25,7 @@ def test_user_docs_promote_direct_uvx_usage_and_safe_project_boundaries():
 
     for expected in [
         "uvx uv-packsize requests",
+        "uvx --prerelease=allow uv-packsize requests",
         "uv tool install uv-packsize",
         "--project pyproject.toml",
         "--lockfile uv.lock",

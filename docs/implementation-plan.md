@@ -8,15 +8,15 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | αリリースと利用者向けDocs公開（`in_progress`） |
-| `in_progress` | `0.2.0a5` α公開とGitHub Pages Docsのdeploy |
-| 次のタスク | publish workflowとPages workflowの外部実行結果を確認する |
+| 現在のPhase | Phase 6: エコシステム連携（`done`） |
+| `in_progress` | なし |
+| 次のタスク | α利用者からのフィードバックを受け、安定版前の改善を優先付ける |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a5`とPages Docsを準備済み。通常CIを通してから公開する。 |
+| αリリース準備 | `0.2.0a5`をGitHub pre-release/PyPIへ公開済み。GitHub Pages Docsもdeploy済み。 |
 
 ## ステータス定義
 
@@ -908,7 +908,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ### 2026-08-09: `0.2.0a5` αリリースとGitHub Pages Docs準備
 
-状態: `in_progress`（GitHub上のdeploy/publish実行待ち）
+状態: `done`
 
 変更:
 
@@ -925,6 +925,10 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-pages-cache uv lock --check` — 成功。
 - 一意なtemporary output directoryで`uv build --no-sources --out-dir <temporary-directory>`と`uv run --locked python scripts/verify_build.py <temporary-directory>` — `0.2.0a5` wheel/sdistを検証。
 - Ruby YAML parseと`git diff --check` — 成功。
+- main通常CI run `31288646137` — lock、lint、Python 3.10〜3.14の全jobが成功。
+- Pages deploy run `31288646146` — `https://kj-9.github.io/uv-packsize/`へ成功。repositoryのPages sourceをGitHub Actionsへ有効化した。
+- GitHub pre-release [`v0.2.0a5`](https://github.com/kj-9/uv-packsize/releases/tag/v0.2.0a5)を検証済みcommit `e8983cd`から作成した。publish run `31288688885`はtag/SHA/version、品質、Python 3.10〜3.14、artifact build/verify、PyPI trusted publishingをすべて成功した。
+- PyPIの`0.2.0a5`を`uvx --prerelease=allow uv-packsize --version`で実行し、version表示を確認した。通常の`uvx uv-packsize`はpre-releaseを既定で選ばないため、DocsとREADMEに明示opt-inを記載した。
 
 ### 2026-08-09: αリリース blocker — absolute temporary parent trust traversal
 
