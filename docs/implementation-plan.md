@@ -8,12 +8,12 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: Node 24 Actions update（local `done`） |
+| 現在のPhase | Follow-up: Node 24 Actions update（`done`） |
 | `in_progress` | なし |
-| 次のタスク | push後にCIとPagesの実run、Node 20 annotation消滅を確認する |
+| 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
-| Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
+| Blocker | F-007: build provenanceを安全に確定できるstableなuv上流featureと対応version待ち。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
 | 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
@@ -908,7 +908,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ### 2026-08-12: F-011 Node 24 Actions major update
 
-状態: local `done` / deployment verification pending
+状態: `done`
 
 変更:
 
@@ -926,16 +926,21 @@ UV_CACHE_DIR=/private/tmp/uv-packsize-f011-cache make ci-check
 UV_CACHE_DIR=/private/tmp/uv-packsize-f011-cache make test
 UV_CACHE_DIR=/private/tmp/uv-packsize-f011-cache uv lock --check
 git diff --check
+gh run view 31593158880 --json databaseId,status,conclusion,name,url,jobs
+gh run view 31593158835 --json databaseId,status,conclusion,name,url,jobs
+gh api repos/kj-9/uv-packsize/check-runs/{job_id}/annotations --paginate
 ```
 
 結果:
 
 - 4 workflowのYAML parseが成功。focused testsは177 passed、全体は1005 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict buildも成功した。
-- local DoDは完了した。remote完了条件として、push後に通常CIとPagesの実runが成功し、Node.js 20 deprecation annotationが消滅することの確認が残る。
+- CI run `31593158880`はlock、lint、Python 3.10〜3.14 testの全jobが成功した。Pages run `31593158835`はbuildとdeployが成功した。
+- 両runの全9 check-run annotationをGitHub APIからread-onlyで確認し、Node.js 20 deprecation annotationは0件だった。`setup-uv` cache keyを別jobが同時作成したためreserveできなかったwarningが1件だけ残ったが、Node 20とは無関係で全job成功への影響はない。
+- localとremoteの完了条件を満たし、F-011を完了した。
 
 次のタスク:
 
-- 変更をpushした後、CIとPages deploymentを確認し、Node 20 annotationが再発しないことを記録する。明示依頼なしにrelease/tag/publishは行わない。
+- なし。外部F-007 blockerだけが残る。明示依頼なしにrelease/tag/publishは行わない。
 
 ### 2026-08-12: F-009 budget config source observable rewrite hardening
 
@@ -3095,4 +3100,4 @@ uv run --locked python scripts/verify_build.py dist
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。body errorを優先し、成功body後のclose failureではparseへ進まないdescriptor lifecycleへhardeningした | baseline read hardening | `done` |
 | F-009 | P4-04dの`pyproject.toml` source readerへpre/open/postのdevice、inode、mode、size、mtime_ns、ctime_ns再照合を追加し、同一inode・同一lengthを含む観測可能なrewriteを拒否した。filesystem-level immutable snapshotは保証しない | config source observable rewrite hardening | `done` |
 | F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。terminal-safe共通display/table primitives、opt-in rich summary、progressだけを抑止する`--quiet`、default-offのTTY colorを完了した | リリース後のCLI text polish | `done` |
-| F-011 | GitHub ActionsのNode.js 20廃止予告へ対応し、`setup-uv@v7`、`configure-pages@v6`、`upload-pages-artifact@v5`、`deploy-pages@v5`へ更新した。local検証は完了し、push後のCI/Pages実runとannotation消滅確認が残る | Node 24対応Actions major update | local `done` / deployment verification pending |
+| F-011 | GitHub ActionsのNode.js 20廃止予告へ対応し、`setup-uv@v7`、`configure-pages@v6`、`upload-pages-artifact@v5`、`deploy-pages@v5`へ更新した。CIとPagesのremote run成功、全check-runでNode 20 annotationが0件であることまで確認した | Node 24対応Actions major update | `done` |
