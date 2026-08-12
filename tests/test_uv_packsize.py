@@ -382,6 +382,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913
     max_total=None,
     max_increase=None,
     incomplete_policy=None,
+    report_format=None,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
@@ -442,6 +443,8 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913
         arguments.extend(("--max-increase", str(max_increase)))
     if incomplete_policy is not None:
         arguments.extend(("--incomplete-policy", incomplete_policy))
+    if report_format is not None:
+        arguments.extend(("--report", report_format))
     return CliRunner().invoke(cli, arguments)
 
 
@@ -1144,6 +1147,43 @@ def test_cli_comparison_json_renders_the_diff_once_without_analysis_roundtrip(
     assert json.loads(result.stdout)["schema_version"] == 1
 
 
+def test_cli_comparison_json_ignores_rich_report_without_projection(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    assert initial.exit_code == 0
+    baseline.write_text(initial.stdout)
+    monkeypatch.setattr(
+        "uv_packsize.cli.project_rich_comparison",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not project")),
+    )
+
+    default = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+    )
+    rich = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+        report_format="rich",
+    )
+
+    assert default.exit_code == rich.exit_code == 0
+    assert default.stdout == rich.stdout
+    assert default.stderr == rich.stderr
+
+
 def test_cli_comparison_json_requires_baseline_before_external_work(monkeypatch):
     monkeypatch.setattr(
         "uv_packsize.cli.shutil.which",
@@ -1580,6 +1620,121 @@ def test_bin_is_presentation_only_for_prefix_wide_record_files(
     assert _reported_total(default.output) == _reported_total(with_scripts.output)
 
 
+def test_cli_report_standard_is_byte_identical_to_the_default(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    default = _run_local_layout(monkeypatch, installed_venv, ["sample==1.0"])
+    explicit = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format="standard",
+    )
+
+    assert default.exit_code == explicit.exit_code == 0
+    assert default.stdout == explicit.stdout
+    assert default.stderr == explicit.stderr
+
+
+def test_cli_rich_report_replaces_primary_and_keeps_only_binary_section(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    report = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        show_scripts=True,
+        report_format="rich",
+    )
+
+    assert report.exit_code == 0
+    assert "--- Rich Analysis Summary ---" in report.stdout
+    assert "--- Top Distributions (Showing 1 of 1) ---" in report.stdout
+    assert "--- Package Sizes ---" not in report.stdout
+    assert "--- Binaries in .venv/bin ---" in report.stdout
+    assert report.stdout.index("Top Distributions") < report.stdout.index("Binaries")
+
+
+def test_cli_json_ignores_rich_report_without_projecting_or_building_graph(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli.project_rich_analysis",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not project")),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.build_installed_dependency_graph",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not build graph")),
+    )
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    rich = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        report_format="rich",
+        explain=True,
+        breakdown=True,
+        contributions=True,
+    )
+
+    assert default.exit_code == rich.exit_code == 0
+    assert default.stdout == rich.stdout
+    assert default.stderr == rich.stderr
+
+
+def test_cli_rich_projection_failure_is_sanitized(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli.project_rich_analysis",
+        lambda *_args: (_ for _ in ()).throw(ValueError("private/path/token")),
+    )
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format="rich",
+    )
+
+    assert result.exit_code == 1
+    assert "Could not render rich report." in result.output
+    assert "private/path/token" not in result.output
+
+
+def test_cli_rich_budget_failure_keeps_primary_before_budget_section(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format="rich",
+        max_total=0,
+    )
+
+    assert result.exit_code == 5
+    assert result.stdout.index("--- Rich Analysis Summary ---") < result.stdout.index(
+        "--- Size Budget ---"
+    )
+    assert "--- Package Sizes ---" not in result.stdout
+
+
 def test_cli_json_writes_only_the_stable_serializer_to_stdout(
     monkeypatch, installed_venv
 ):
@@ -1842,6 +1997,42 @@ def test_cli_contributions_renders_once_and_composes_all_sections(
         )[0]
     )
     assert result.output.count("--- Package Sizes ---") == 1
+    assert (
+        result.output.index("--- Requested Roots ---")
+        < result.output.index("--- File Category Breakdown ---")
+        < result.output.index("--- Root Contributions ---")
+    )
+
+
+def test_cli_rich_report_composes_explanations_with_one_graph_build(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    calls = []
+    original = __import__(
+        "uv_packsize.cli", fromlist=["build_installed_dependency_graph"]
+    ).build_installed_dependency_graph
+
+    def build_once(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr("uv_packsize.cli.build_installed_dependency_graph", build_once)
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+        contributions=True,
+        report_format="rich",
+    )
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert result.output.count("--- Rich Analysis Summary ---") == 1
+    assert "--- Package Sizes ---" not in result.output
     assert (
         result.output.index("--- Requested Roots ---")
         < result.output.index("--- File Category Breakdown ---")
@@ -2523,6 +2714,21 @@ def test_cli_prefix_analyzes_without_uv_or_install_helpers(monkeypatch, installe
     assert "sample" in result.stdout
     assert "Existing prefix analysis complete." in result.stdout
     assert "Calculating size" not in result.output
+
+
+def test_cli_prefix_rich_report_marks_build_policy_unknown(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--report", "rich")
+    )
+
+    assert result.exit_code == 0
+    assert "--- Rich Analysis Summary ---" in result.stdout
+    assert "Input kind: existing-prefix" in result.stdout
+    assert "Build policy: unknown" in result.stdout
+    assert "--- Package Sizes ---" not in result.stdout
 
 
 def test_cli_prefix_json_uses_v2_and_hides_prefix(monkeypatch, installed_venv):

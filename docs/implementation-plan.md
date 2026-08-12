@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Follow-up: CLI text polish（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | F-010 第2段 slice 2: opt-in rich summaryのCLI接続 |
+| 次のタスク | F-010 第2段 slice 3: rich summaryのhelp/README/Docs/E2E契約 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第2段 slice 2 opt-in rich summary CLI接続
+
+状態: `done`
+
+変更:
+
+- Clickの`--report [standard|rich]`を追加し、defaultの`standard`と明示`--report standard`は既存text bytes、channel、exit codeを維持した。`rich`はpure rich analysis/comparison viewをprimary text reportとして表示する。
+- fresh installのrich reportは`--explain`、`--breakdown`、`--contributions`を既存順で続け、graph buildは一度だけ行う。`--bin`はstandard package tableを再表示せず、既存の安全なbinary sectionだけをrich primaryの後へ追加する。
+- project-lock、existing-prefix、baseline comparison、budget sectionとexit 5へrich primaryを接続した。project/prefixの既存option guardsは維持した。
+- `--json`と`--comparison-json`では`--report rich`を受理して無視し、stdout/stderr bytesとgraph callsを既存JSON契約どおりに維持する。rich projection/render failureはraw exceptionを出さず固定のClick errorへ正規化する。README/Docs/help公開契約は次sliceまで変更していない。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv run --locked pytest tests/test_rich_report.py tests/test_uv_packsize.py tests/test_project_lock_cli.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは152 passed、全体は920 passed / 2 skipped。format、lint、typecheck、README整合性、docs build、lock整合性、diff checkも成功した。
+- standard bytes不変、fresh/project/prefix rich report、rich+bin、rich+graph sectionsの単回build、rich+budget、JSON/comparison JSONのrich無視、project lockの`lock_changed`、sanitized rich renderer failureを回帰テストで固定した。
+
+次のタスク:
+
+- F-010 第2段 slice 3として、`--report`のhelp、README、Docs、local-wheel E2Eを公開契約として完成させる。
 
 ### 2026-08-12: F-010 第2段 slice 1 pure rich summary view/renderer
 

@@ -3,7 +3,11 @@ from typing import Any, cast
 
 import pytest
 
-from uv_packsize.baseline import Baseline, BaselineDistribution, analysis_result_to_baseline
+from uv_packsize.baseline import (
+    Baseline,
+    BaselineDistribution,
+    analysis_result_to_baseline,
+)
 from uv_packsize.diff import AnalysisDiff, compare_baselines
 from uv_packsize.models import (
     AnalysisResult,
@@ -356,6 +360,7 @@ def test_comparison_projection_rejects_forged_nested_baseline_tree():
     with pytest.raises(ValueError, match="analysis diff is invalid"):
         project_rich_comparison(forged_diff)
 
+    valid = _fresh_result()
     forged_file = object.__new__(FileEntry)
     for name, value in (
         ("path", "/private/invalid.py"),

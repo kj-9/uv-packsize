@@ -80,6 +80,12 @@ from uv_packsize.project_lock_reader import (
     _read_validated_project_lock,
 )
 from uv_packsize.render import render_analysis_report
+from uv_packsize.rich_report import (
+    project_rich_analysis,
+    project_rich_comparison,
+    render_rich_analysis_report,
+    render_rich_comparison_report,
+)
 from uv_packsize.root_contribution_render import render_root_contribution_sections
 from uv_packsize.root_contributions import summarize_root_contributions
 
@@ -412,6 +418,13 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Write the versioned baseline comparison result as JSON to stdout.",
 )
 @click.option(
+    "--report",
+    "report_format",
+    type=click.Choice(["standard", "rich"]),
+    default="standard",
+    hidden=True,
+)
+@click.option(
     "--budget-config",
     type=click.Path(path_type=Path),
     help="Read budget policy from [tool.uv-packsize.budget] in PATH.",
@@ -480,6 +493,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     bin,
     json_output,
     comparison_json,
+    report_format,
     budget_config,
     max_total,
     max_increase,
@@ -573,6 +587,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             case_rule=CaseRule(case_rule),
             bin=bin,
             json_output=json_output,
+            report_format=report_format,
         )
         return
 
@@ -593,6 +608,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             python_version=python_version,
             policy=policy,
             bin=bin,
+            report_format=report_format,
         )
         return
 
@@ -703,7 +719,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                         "Could not render comparison JSON."
                     ) from None
             else:
-                report = render_diff_report(diff)
+                report = _render_comparison_report(diff, report_format=report_format)
                 if budget_evaluation is not None:
                     report = "\n\n".join(
                         (report, render_budget_report(budget_evaluation))
@@ -773,7 +789,14 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                     )
                 )
             report = "\n\n".join(
-                (render_analysis_report(result, show_scripts=bin), *sections)
+                (
+                    _render_primary_analysis_report(
+                        result,
+                        report_format=report_format,
+                        show_scripts=bin,
+                    ),
+                    *sections,
+                )
             )
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
@@ -785,7 +808,11 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             )
             click.echo(report)
         else:
-            report = render_analysis_report(result, show_scripts=bin)
+            report = _render_primary_analysis_report(
+                result,
+                report_format=report_format,
+                show_scripts=bin,
+            )
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
             if budget_evaluation is not None and not budget_evaluation.passed:
@@ -811,6 +838,58 @@ def _write_fresh_baseline_if_requested(
         write_baseline(path, payload, overwrite=overwrite)
     except BaselineWriteError as error:
         raise _BaselineClickError(_baseline_write_failure_message(error)) from None
+
+
+def _render_primary_analysis_report(
+    result,
+    *,
+    report_format: str,
+    show_scripts: bool,
+    binaries_title: str = "Binaries in .venv/bin",
+) -> str:
+    """Render one text primary report without changing the standard contract."""
+
+    if report_format == "standard":
+        return render_analysis_report(
+            result, show_scripts=show_scripts, binaries_title=binaries_title
+        )
+    if report_format != "rich":
+        raise ValueError("report_format must be a supported report format")
+    try:
+        report = render_rich_analysis_report(project_rich_analysis(result))
+        if show_scripts:
+            report = "\n\n".join(
+                (report, _binary_section(result, binaries_title=binaries_title))
+            )
+        return report
+    except (TypeError, ValueError):
+        raise click.ClickException("Could not render rich report.") from None
+
+
+def _render_comparison_report(diff, *, report_format: str) -> str:
+    """Render one text comparison report without changing the standard contract."""
+
+    if report_format == "standard":
+        return render_diff_report(diff)
+    if report_format != "rich":
+        raise ValueError("report_format must be a supported report format")
+    try:
+        return render_rich_comparison_report(project_rich_comparison(diff))
+    except (TypeError, ValueError):
+        raise click.ClickException("Could not render rich report.") from None
+
+
+def _binary_section(result, *, binaries_title: str) -> str:
+    """Reuse the established binary table without including the standard primary."""
+
+    sections = render_analysis_report(
+        result, show_scripts=True, binaries_title=binaries_title
+    ).split("\n\n")
+    heading = f"--- {binaries_title} ---"
+    for section in sections:
+        if section.startswith(heading):
+            return section
+    raise ValueError("could not isolate the binary report section")
 
 
 def _validate_budget_prefix_options(  # noqa: PLR0913
@@ -1056,6 +1135,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
     python_version: str | None,
     policy: BudgetPolicy | None,
     bin: bool,
+    report_format: str,
 ) -> None:
     """Run the project-lock path without reopening validated input bytes."""
 
@@ -1166,7 +1246,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
                     "Could not render comparison JSON."
                 ) from None
         else:
-            report = render_diff_report(diff)
+            report = _render_comparison_report(diff, report_format=report_format)
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
             click.echo(report)
@@ -1183,7 +1263,11 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
             )
         click.echo(render_project_lock_analysis_json(result), nl=False)
     else:
-        report = render_analysis_report(result, show_scripts=bin)
+        report = _render_primary_analysis_report(
+            result,
+            report_format=report_format,
+            show_scripts=bin,
+        )
         if budget_evaluation is not None:
             report = "\n\n".join((report, render_budget_report(budget_evaluation)))
         if budget_evaluation is not None and not budget_evaluation.passed:
@@ -1248,13 +1332,14 @@ def _validate_prefix_options(  # noqa: PLR0913
         raise click.UsageError(f"{unavailable} is unavailable with --prefix.")
 
 
-def _run_prefix_analysis(
+def _run_prefix_analysis(  # noqa: PLR0913
     *,
     prefix: Path,
     site_packages_relative: tuple[str, ...],
     case_rule: CaseRule,
     bin: bool,
     json_output: bool,
+    report_format: str,
 ) -> None:
     """Analyze an existing prefix without invoking uv or an interpreter."""
 
@@ -1281,8 +1366,9 @@ def _run_prefix_analysis(
         click.echo(render_analysis_json(result, schema_version=2), nl=False)
     else:
         click.echo(
-            render_analysis_report(
+            _render_primary_analysis_report(
                 result,
+                report_format=report_format,
                 show_scripts=bin,
                 binaries_title="Binaries in prefix",
             )

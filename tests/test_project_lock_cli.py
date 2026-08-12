@@ -137,6 +137,23 @@ def test_project_lock_text_report_keeps_progress_on_stderr(monkeypatch):
     )
 
 
+def test_project_lock_rich_text_report_replaces_the_standard_primary(monkeypatch):
+    _project_double(monkeypatch)
+
+    result = CliRunner().invoke(cli, _arguments("--report", "rich"))
+
+    assert result.exit_code == 0
+    assert "--- Rich Analysis Summary ---" in result.stdout
+    assert "Input kind: project-lock" in result.stdout
+    assert "--- Package Sizes ---" not in result.stdout
+    assert result.stderr == (
+        "Calculating size for the selected project lock...\n"
+        "Installing the selected project lock...\n"
+        "Analyzing sizes...\n"
+        "\nCalculation complete.\n"
+    )
+
+
 def test_project_lock_forwards_an_explicit_python_selection_to_the_bridge(monkeypatch):
     _project_double(monkeypatch, expected_python="3.14")
 
@@ -170,6 +187,33 @@ def test_project_lock_baseline_comparison_and_budget_use_v3_v2_contracts(
     budget = CliRunner().invoke(cli, _arguments("--json", "--max-total", "0"))
     assert budget.exit_code == 5, budget.output
     assert budget.stdout == ""
+
+
+def test_project_lock_comparison_json_ignores_rich_report(monkeypatch, tmp_path):
+    _project_double(monkeypatch)
+    baseline = tmp_path / "project-baseline.json"
+    recorded = CliRunner().invoke(
+        cli, _arguments("--json", "--write-baseline", str(baseline))
+    )
+    assert recorded.exit_code == 0
+    monkeypatch.setattr(
+        "uv_packsize.cli.project_rich_comparison",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not project")),
+    )
+
+    default = CliRunner().invoke(
+        cli, _arguments("--baseline", str(baseline), "--comparison-json")
+    )
+    rich = CliRunner().invoke(
+        cli,
+        _arguments(
+            "--baseline", str(baseline), "--comparison-json", "--report", "rich"
+        ),
+    )
+
+    assert default.exit_code == rich.exit_code == 0
+    assert default.stdout == rich.stdout
+    assert default.stderr == rich.stderr
 
 
 @pytest.mark.parametrize(

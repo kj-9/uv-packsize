@@ -400,8 +400,7 @@ def _has_exact_baseline_tree(baseline: object) -> bool:
             (
                 type(baseline.measurement) is BaselineMeasurement,
                 type(baseline.warnings) is BaselineWarningSummary,
-                type(baseline.duplicate_ownership)
-                is BaselineDuplicateOwnershipSummary,
+                type(baseline.duplicate_ownership) is BaselineDuplicateOwnershipSummary,
                 isinstance(baseline.distributions, tuple),
                 all(
                     type(item) is BaselineDistribution
@@ -423,8 +422,7 @@ def _has_exact_baseline_tree(baseline: object) -> bool:
             return type(baseline.project_lock_context) is BaselineProjectLockContext
         return (
             baseline.schema_version == 2
-            and type(baseline.existing_prefix_context)
-            is BaselineExistingPrefixContext
+            and type(baseline.existing_prefix_context) is BaselineExistingPrefixContext
         )
     except (AttributeError, TypeError):
         return False
