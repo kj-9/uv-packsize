@@ -1,3 +1,20 @@
+# CI
+
+For a locked project, commit a reviewed baseline and optional budget policy, then run a read-only comparison:
+
+```bash
+uvx uv-packsize \
+  --project pyproject.toml --lockfile uv.lock \
+  --baseline .ci/uv-packsize-baseline.json \
+  --budget-config pyproject.toml \
+  --comparison-json > comparison.json
+```
+
+The command does not create or refresh the baseline. Keep baseline updates as separate, reviewed changes.
+
+## GitHub Actions example
+
+```yaml
 name: Dependency footprint
 
 on:
@@ -41,3 +58,6 @@ jobs:
           print(f"- Current total: {current_total} bytes")
           print(f"- Change: {global_delta:+d} bytes")
           PY
+```
+
+This needs only `contents: read`, no secrets, write permissions, PR comments, or automatic baseline updates. The comparison JSON is private temporary data and the summary exposes only fixed schema fields and byte totals, not requirements, paths, or lock contents.

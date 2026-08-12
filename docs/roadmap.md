@@ -15,6 +15,10 @@ project analysisは、公開済みの`0.1.1`から機能範囲が大きく広が
 `0.2.0a5`はPyPI公開と通常CIによる実運用確認を終えた。`0.2.0`はその機能集合を
 安定版として公開し、通常の`uvx uv-packsize`で選択可能にする。
 
+利用者向けDocsはGitHub Pagesで公開し、MkDocsでHome、導入、測定、locked
+project、baseline/budget、CI、測定契約、安全性と制約を継続的に管理する。Docsの
+公開確認も安定版リリース前の確認項目とする。
+
 公開は`v0.2.0`のGitHub Release作成を契機とする。publish workflowはその
 release tagをcheckoutし、tag・checkout SHA・`pyproject.toml`のversionの一致、
 lock、静的検査、対応Python全テスト、artifact検証を通過した場合だけPyPIへ

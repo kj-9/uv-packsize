@@ -23,10 +23,7 @@ uv tool install uv-packsize
 ```
 
 `pip install uv-packsize` works too. See the [user documentation](https://kj-9.github.io/uv-packsize/)
-for quick starts, locked-project analysis, and CI budget examples.
-```bash
-uv tool install uv-packsize
-```
+for quick starts, locked-project analysis, baselines, and CI budget examples.
 
 ## Usage
 
@@ -461,7 +458,7 @@ jobs:
           temporary_directory="$(mktemp -d)"
           trap 'rm -rf "$temporary_directory"' EXIT
           comparison_json="$temporary_directory/comparison.json"
-          uvx --from uv-packsize uv-packsize --project pyproject.toml --lockfile uv.lock --baseline .ci/uv-packsize-baseline.json --budget-config pyproject.toml --comparison-json > "$comparison_json"
+          uvx uv-packsize --project pyproject.toml --lockfile uv.lock --baseline .ci/uv-packsize-baseline.json --budget-config pyproject.toml --comparison-json > "$comparison_json"
           python - "$comparison_json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
           import json
           import sys

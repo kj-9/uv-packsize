@@ -43,6 +43,7 @@ uv-packsize = "uv_packsize.cli:cli"
 [dependency-groups]
 dev = [
     "cogapp",
+    "mkdocs-material",
     "pytest",
     "ty",
     "ruff",

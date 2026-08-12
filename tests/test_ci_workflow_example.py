@@ -32,7 +32,7 @@ def test_project_lock_workflow_example_uses_explicit_safe_inputs_and_summary():
     workflow = WORKFLOW_EXAMPLE.read_text()
 
     command = (
-        "uvx --from uv-packsize uv-packsize --project pyproject.toml "
+        "uvx uv-packsize --project pyproject.toml "
         "--lockfile uv.lock --baseline .ci/uv-packsize-baseline.json "
         '--budget-config pyproject.toml --comparison-json > "$comparison_json"'
     )
@@ -66,6 +66,13 @@ def test_readme_embeds_the_tested_workflow_example_verbatim():
     workflow = WORKFLOW_EXAMPLE.read_text().rstrip()
 
     assert f"```yaml\n{workflow}\n```" in readme
+
+
+def test_user_guide_embeds_the_tested_workflow_example_verbatim():
+    user_guide = (PROJECT_ROOT / "docs" / "user-guide" / "ci.md").read_text()
+    workflow = WORKFLOW_EXAMPLE.read_text().rstrip()
+
+    assert f"```yaml\n{workflow}\n```" in user_guide
 
 
 def test_workflow_summary_script_reads_only_the_documented_safe_fields(tmp_path):

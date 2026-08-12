@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-08-08
+最終更新: 2026-08-12
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -9,14 +9,14 @@
 | 項目 | 状態 |
 |---|---|
 | 現在のPhase | Phase 6: エコシステム連携（`done`） |
-| `in_progress` | なし |
-| 次のタスク | `0.2.0`安定版の外部公開と結果確認 |
+| `in_progress` | 利用者向けDocsのMkDocs移行 |
+| 次のタスク | MkDocsのstrict build・Pages deployを確認後、`0.2.0`安定版を外部公開する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| 安定版リリース準備 | `0.2.0`へversion/classifier/Docsを更新中。全release gate後に公開する。 |
+| 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
 
 ## ステータス定義
 
@@ -905,6 +905,29 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: 利用者向けDocsのMkDocs移行
+
+状態: `in_progress`（ローカル完了、Pages deploy確認待ち）
+
+変更:
+
+- 既存の単一静的ページを、`docs/user-guide/`配下のMkDocs向け利用者ガイドへ分割した。
+- Home、Getting started、package measurement、locked project analysis、baseline/budget、CI、measurement contract、安全性と制約を、READMEの既存公開CLI契約に基づいて記述した。
+- READMEの導入から重複していた`uv tool install`コードブロックを除去し、Pages Docsへの導線を維持した。
+- MkDocs Materialの検索、light/dark切替、コードコピー、セクションnavigationを有効化し、既存Pagesのnavy/teal/warm配色を引き継いだHome、価値カード、最短導線を追加した。
+- Pages workflowをstrict buildとdeployへ分離し、build jobは`contents: read`、deploy jobだけが`pages: write`と`id-token: write`を持つ構成にした。通常`make ci-check`にも一時出力先へのstrict Docs buildを接続した。
+
+検証:
+
+- `make docs-check` — 成功（MkDocs strict build）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache uv run --locked cog --check --diff README.md`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache uv run --locked pytest tests/test_ci_workflow_example.py -q` — 5 passed。安定版のCI例を`uvx uv-packsize`へ統一し、READMEと利用者ガイドが同一の検証fixtureを逐語で埋め込むことを確認した。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache uv run --locked pytest tests/test_pages_docs.py tests/test_ci_workflow_example.py -q` — 9 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make ci-check`、`uv lock --check`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make test` — 886 passed, 2 skipped。
+- Desktopと390×844 viewportでHomeを表示し、navigation、CTA、カード、code copy、dark theme、mobile reflowを確認した。Material iconが文字列表示されないようemoji extensionを追加した。
+- GitHub Pages deployは、MkDocs基盤側のworkflow変更を含めて確認する予定。
 
 ### 2026-08-12: `0.2.0` 安定版リリース準備
 

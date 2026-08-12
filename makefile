@@ -1,4 +1,4 @@
-.PHONY: format lint typecheck test check ci-check build verify-build
+.PHONY: format lint typecheck test docs docs-check check ci-check build verify-build
 
 UV_RUN=uv run --locked
 
@@ -20,11 +20,18 @@ typecheck:
 test:
 	$(UV_RUN) pytest
 
+docs:
+	$(UV_RUN) mkdocs build --strict
+
+docs-check:
+	@site_dir="$$(mktemp -d)"; trap 'rm -rf "$$site_dir"' EXIT; $(UV_RUN) mkdocs build --strict --site-dir "$$site_dir"
+
 ci-check:
 	$(UV_RUN) ruff format . --check
 	$(UV_RUN) ruff check .
 	$(UV_RUN) ty check
 	$(UV_RUN) cog --check --diff README.md
+	$(MAKE) docs-check
 
 check: readme format lint typecheck test
 
