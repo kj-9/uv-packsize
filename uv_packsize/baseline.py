@@ -1093,9 +1093,25 @@ def load_baseline(path: Path) -> Baseline:  # noqa: PLR0912
         if len(payload) > MAX_BASELINE_BYTES:
             raise BaselineLoadError("size-limit")
     except BaselineLoadError:
+        _close_after_failed_read(descriptor)
         raise
     except OSError as error:
+        _close_after_failed_read(descriptor)
         raise BaselineLoadError("read-failed") from error
-    finally:
+    close_failed = False
+    try:
         os.close(descriptor)
+    except OSError:
+        close_failed = True
+    if close_failed:
+        raise BaselineLoadError("read-failed") from None
     return parse_baseline_json(payload)
+
+
+def _close_after_failed_read(descriptor: int) -> None:
+    """Keep a read-body failure authoritative over descriptor cleanup."""
+
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass

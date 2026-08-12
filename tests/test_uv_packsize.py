@@ -12,6 +12,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+import uv_packsize.baseline as baseline_module
 from uv_packsize.analysis import AnalysisContextError, AnalysisContextErrorCode
 from uv_packsize.baseline import BaselineError, load_baseline
 from uv_packsize.baseline_write import BaselineWriteError
@@ -1296,6 +1297,31 @@ def test_cli_baseline_load_failures_are_safe_and_typed(monkeypatch, failure):
     assert "secret-baseline" not in result.stderr
     assert "Traceback" not in result.stderr
     assert "code=" in result.stderr and "field=" in result.stderr
+
+
+def test_cli_baseline_close_failure_is_safe_exit_three_before_uv(monkeypatch, tmp_path):
+    source = PROJECT_ROOT / "tests" / "golden" / "analysis-result-v1.json"
+    private_source = tmp_path / "credential-token-baseline.json"
+    private_source.write_bytes(source.read_bytes())
+    real_close = baseline_module.os.close
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("private close detail")
+
+    monkeypatch.setattr(baseline_module.os, "close", close_then_fail)
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda _command: (_ for _ in ()).throw(AssertionError("uv must not run")),
+    )
+
+    result = CliRunner().invoke(cli, ["--baseline", str(private_source), "sample==1.0"])
+
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    assert "code=read-failed, field=file" in result.stderr
+    for unsafe in ("credential-token", "private close detail", "Traceback"):
+        assert unsafe not in result.stderr
 
 
 @pytest.mark.parametrize(

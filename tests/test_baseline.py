@@ -502,6 +502,78 @@ def test_load_baseline_keeps_file_paths_and_os_errors_out_of_diagnostics(tmp_pat
     assert load_baseline(source).schema_version == 2
 
 
+def test_load_baseline_maps_close_failure_without_parsing_or_raw_cause(monkeypatch):
+    source = _ROOT / "tests" / "golden" / "analysis-result-v2-existing-prefix.json"
+    real_close = baseline_module.os.close
+    parse_calls = 0
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("private close detail")
+
+    def unexpected_parse(_payload):
+        nonlocal parse_calls
+        parse_calls += 1
+        raise AssertionError("parse must not run after close failure")
+
+    monkeypatch.setattr(baseline_module.os, "close", close_then_fail)
+    monkeypatch.setattr(baseline_module, "parse_baseline_json", unexpected_parse)
+
+    with pytest.raises(BaselineLoadError) as captured:
+        load_baseline(source)
+
+    assert captured.value.code == "read-failed"
+    assert captured.value.field == "file"
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert "private close detail" not in str(captured.value)
+    assert parse_calls == 0
+
+
+def test_load_baseline_body_error_wins_over_close_error(monkeypatch):
+    source = _ROOT / "tests" / "golden" / "analysis-result-v2-existing-prefix.json"
+    real_close = baseline_module.os.close
+    body_failure = OSError("private body detail")
+
+    def fail_body(_descriptor: int):
+        raise body_failure
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("private close detail")
+
+    monkeypatch.setattr(baseline_module.os, "fstat", fail_body)
+    monkeypatch.setattr(baseline_module.os, "close", close_then_fail)
+
+    with pytest.raises(BaselineLoadError) as captured:
+        load_baseline(source)
+
+    assert captured.value.code == "read-failed"
+    assert captured.value.__cause__ is body_failure
+
+
+def test_load_baseline_open_failure_does_not_close(monkeypatch, tmp_path):
+    source = tmp_path / "baseline.json"
+    source.write_bytes(b"{}")
+    close_calls = 0
+
+    def fail_open(*_args):
+        raise OSError("private open detail")
+
+    def unexpected_close(_descriptor: int) -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(baseline_module.os, "open", fail_open)
+    monkeypatch.setattr(baseline_module.os, "close", unexpected_close)
+
+    with pytest.raises(BaselineLoadError) as captured:
+        load_baseline(source)
+
+    assert captured.value.code == "read-failed"
+    assert close_calls == 0
+
+
 def test_load_baseline_rejects_symlink_and_special_file_without_reading_them(tmp_path):
     source = _ROOT / "tests" / "golden" / "analysis-result-v2-existing-prefix.json"
     symlink = tmp_path / "baseline-link.json"
