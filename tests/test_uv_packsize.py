@@ -51,7 +51,7 @@ from uv_packsize.inventory import InventoryScanError, InventoryScanErrorCode
 from uv_packsize.json_render import render_analysis_json
 from uv_packsize.models import BuildPolicy, CaseRule
 
-EXPECTED_VERSION = "0.2.0a5"
+EXPECTED_VERSION = "0.2.0"
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
@@ -63,7 +63,7 @@ def test_project_metadata():
         rf'^version = "{re.escape(EXPECTED_VERSION)}"$', project, re.MULTILINE
     )
     assert re.search(r'^requires-python = ">=3\.10"$', project, re.MULTILINE)
-    assert '"Development Status :: 3 - Alpha"' in project
+    assert '"Development Status :: 5 - Production/Stable"' in project
 
     classifier_block = re.search(
         r"^classifiers = \[(.*?)^\]$", project, re.MULTILINE | re.DOTALL
@@ -233,8 +233,8 @@ def test_publish_workflow_checks_out_and_validates_the_release_tag():
 
 
 def test_build_verifier_rejects_unexpected_publish_file(tmp_path):
-    (tmp_path / "uv_packsize-0.2.0a5-py3-none-any.whl").touch()
-    (tmp_path / "uv_packsize-0.2.0a5.tar.gz").touch()
+    (tmp_path / "uv_packsize-0.2.0-py3-none-any.whl").touch()
+    (tmp_path / "uv_packsize-0.2.0.tar.gz").touch()
     unexpected = tmp_path / "uv_packsize-0.1.1-py3-none-any.whl"
     unexpected.touch()
 

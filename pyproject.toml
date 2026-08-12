@@ -1,13 +1,13 @@
 [project]
 name = "uv-packsize"
-version = "0.2.0a5"
+version = "0.2.0"
 description = "report size of python package with its deps using uv"
 readme = "README.md"
 authors = [{name = "kj-9"}]
 license = "Apache-2.0"
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

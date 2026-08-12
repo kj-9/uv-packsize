@@ -10,13 +10,13 @@
 |---|---|
 | 現在のPhase | Phase 6: エコシステム連携（`done`） |
 | `in_progress` | なし |
-| 次のタスク | α利用者からのフィードバックを受け、安定版前の改善を優先付ける |
+| 次のタスク | `0.2.0`安定版の外部公開と結果確認 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| αリリース準備 | `0.2.0a5`をGitHub pre-release/PyPIへ公開済み。GitHub Pages Docsもdeploy済み。 |
+| 安定版リリース準備 | `0.2.0`へversion/classifier/Docsを更新中。全release gate後に公開する。 |
 
 ## ステータス定義
 
@@ -905,6 +905,22 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: `0.2.0` 安定版リリース準備
+
+状態: `in_progress`（通常CIとrelease workflowの外部実行待ち）
+
+変更:
+
+- `0.2.0a5`の公開後検証を踏まえ、version、lock root package、artifact verifier、version固定テストをPEP 440安定版`0.2.0`へ同期した。
+- PyPI classifierを`Development Status :: 5 - Production/Stable`へ更新し、READMEとGitHub Pagesからα限定の`--prerelease=allow`案内を除去した。以後は`uvx uv-packsize requests`が安定版をそのまま選択する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-stable-cache uv run --locked pytest tests/test_pages_docs.py tests/test_uv_packsize.py tests/test_verify_build.py -q` — 119 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-stable-cache make ci-check`、`uv lock --check`、`git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-stable-cache make test` — 883 passed, 2 skipped。
+- 一意なtemporary output directoryで`uv build --no-sources --out-dir <temporary-directory>`と`uv run --locked python scripts/verify_build.py <temporary-directory>` — `0.2.0` wheel/sdistを検証。
 
 ### 2026-08-09: `0.2.0a5` αリリースとGitHub Pages Docs準備
 

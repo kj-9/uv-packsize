@@ -4,18 +4,18 @@
 
 実際のタスク状態と検証記録は[`implementation-plan.md`](./implementation-plan.md)で管理する。
 
-## αリリース方針
+## 0.2.0 安定版リリース
 
 Phase 2〜6で追加した測定inventory、versioned JSON、baseline/budget、locked
 project analysisは、公開済みの`0.1.1`から機能範囲が大きく広がる。最初の先行
 `0.2.0a1`はGitHub pre-releaseでCIがpublish前に失敗したため、tagを付け替えず
 欠番として残す。`0.2.0a2`はLinux baseline writer failure、`0.2.0a3`はPython
 3.12のbaseline writer changed-parent failureにより、いずれもPyPI publish前に
-停止した。`0.2.0a4`もbaseline writer failureによりPyPI publish前に停止したため、
-既存tagを付け替えず欠番として残す。修正版のPEP 440 pre-release`0.2.0a5`は
-GitHub pre-releaseとPyPIへ公開済みであり、安定版`0.2.0`を約束するものではない。
+先行版`0.2.0a1`〜`0.2.0a4`はpublish前CI failureで止め、tagを付け替えず欠番として残した。
+`0.2.0a5`はPyPI公開と通常CIによる実運用確認を終えた。`0.2.0`はその機能集合を
+安定版として公開し、通常の`uvx uv-packsize`で選択可能にする。
 
-公開は`v0.2.0a5`のGitHub Release作成を契機とした。publish workflowはその
+公開は`v0.2.0`のGitHub Release作成を契機とする。publish workflowはその
 release tagをcheckoutし、tag・checkout SHA・`pyproject.toml`のversionの一致、
 lock、静的検査、対応Python全テスト、artifact検証を通過した場合だけPyPIへ
 trusted publishingで送る。tag、release、publishはリリース担当者が明示的に

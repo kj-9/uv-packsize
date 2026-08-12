@@ -16,13 +16,6 @@ Run it once with `uv`—no separate installation needed:
 uvx uv-packsize requests
 ```
 
-The current feature release is an alpha. To try it before the next stable
-release, opt in to pre-releases explicitly:
-
-```bash
-uvx --prerelease=allow uv-packsize requests
-```
-
 To keep it installed for repeated use:
 
 ```bash
