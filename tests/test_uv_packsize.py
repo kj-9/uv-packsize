@@ -178,6 +178,8 @@ def test_ci_checks_lock_and_supported_python_versions():
     assert re.findall(
         r'^\s+version: "([^"]+)"$', lint_job.group("body"), re.MULTILINE
     ) == ["0.11.3"]
+    assert workflow.count("uses: astral-sh/setup-uv@v7") == 3
+    assert "astral-sh/setup-uv@v6" not in workflow
 
 
 def test_publish_workflow_verifies_supported_release_artifacts():
@@ -219,6 +221,19 @@ def test_publish_workflow_verifies_supported_release_artifacts():
     assert deploy_job.group("body").index("make verify-build") < deploy_job.group(
         "body"
     ).index("uses: pypa/gh-action-pypi-publish")
+    assert workflow.count("uses: astral-sh/setup-uv@v7") == 3
+    assert "astral-sh/setup-uv@v6" not in workflow
+
+
+def test_update_workflow_uses_the_node_24_setup_uv_major_without_semantic_changes():
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "update.yml").read_text()
+
+    assert workflow.count("uses: astral-sh/setup-uv@v7") == 1
+    assert "astral-sh/setup-uv@v6" not in workflow
+    assert "schedule:" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "contents: write" in workflow
+    assert "pull-requests: write" in workflow
 
 
 def test_publish_workflow_checks_out_and_validates_the_release_tag():

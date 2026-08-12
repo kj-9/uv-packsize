@@ -527,7 +527,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.11.3"
       - name: Compare locked dependency footprint

@@ -41,9 +41,17 @@ def test_pages_workflow_builds_strict_mkdocs_then_deploys_with_least_privilege()
     assert "uv run --locked mkdocs build --strict" in workflow
     assert "path: ${{ runner.temp }}/site" in workflow
     assert "needs: build" in workflow
-    assert "actions/configure-pages@v5" in workflow
-    assert "actions/upload-pages-artifact@v4" in workflow
-    assert "actions/deploy-pages@v4" in workflow
+    assert "actions/configure-pages@v6" in workflow
+    assert "actions/upload-pages-artifact@v5" in workflow
+    assert "actions/deploy-pages@v5" in workflow
+    assert workflow.count("astral-sh/setup-uv@v7") == 1
+    for legacy in (
+        "astral-sh/setup-uv@v6",
+        "actions/configure-pages@v5",
+        "actions/upload-pages-artifact@v4",
+        "actions/deploy-pages@v4",
+    ):
+        assert legacy not in workflow
     assert "contents: read" in workflow
     assert "pages: write" in workflow
     assert "id-token: write" in workflow

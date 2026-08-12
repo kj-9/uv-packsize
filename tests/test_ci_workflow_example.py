@@ -26,6 +26,8 @@ def test_project_lock_workflow_example_is_least_privilege_and_read_only():
     assert "gh pr comment" not in workflow
     assert "--write-baseline" not in workflow
     assert "--overwrite-baseline" not in workflow
+    assert workflow.count("uses: astral-sh/setup-uv@v7") == 1
+    assert "astral-sh/setup-uv@v6" not in workflow
 
 
 def test_project_lock_workflow_example_uses_explicit_safe_inputs_and_summary():
