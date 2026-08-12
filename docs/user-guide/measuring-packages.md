@@ -25,6 +25,46 @@ uvx uv-packsize 'package-a' 'package-b' --contributions
 
 These options affect only the text presentation and do not change a JSON result.
 
+## Use the compact summary
+
+The default `--report standard` layout keeps the complete distribution table.
+Use the opt-in rich layout for a compact, redacted overview:
+
+```bash
+uvx uv-packsize requests --report rich
+```
+
+```text
+--- Rich Analysis Summary ---
+Input kind: fresh-install
+Build policy: wheel-only
+Completeness: complete
+Warnings: none
+Distributions: 1
+Canonical global size: 1.50 KiB
+Distribution-owned aggregate: 1.50 KiB
+
+--- Top Distributions (Showing 1 of 1) ---
+Distribution  Owned size
+------------  ----------
+sample          1.50 KiB
+```
+
+This example is generated from a fixed test result; actual names and sizes
+depend on the resolved environment. Rich analysis reports show at most five
+distributions and state `Showing 5 of N` when more were measured. The rich
+primary summary omits raw requirements, installed paths, resolved versions,
+context fingerprints, and lock identities.
+
+The existing `--bin`, `--explain`, `--breakdown`, `--contributions`, budget,
+and baseline-writing behavior composes with the rich primary report. With a
+baseline, rich mode renders a redacted comparison summary and up to five
+non-zero distribution changes. Appended sections are not covered by the
+primary-summary redaction: `--bin` can display script paths, and `--explain`
+can display installed metadata including resolved versions and dependency
+information. `--json` and `--comparison-json` ignore `--report`, preserving
+their versioned output bytes.
+
 ## Save JSON
 
 ```bash

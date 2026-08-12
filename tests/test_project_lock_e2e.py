@@ -79,6 +79,38 @@ def test_real_uv_sync_project_lock_baseline_write_diff_and_budget(tmp_path):
     _assert_temporary_work_is_cleaned(tmp_path)
 
 
+def test_real_uv_sync_project_lock_rich_analysis_and_comparison(tmp_path):
+    project, lockfile, environment = _locked_inputs(tmp_path)
+    baseline = tmp_path / "project-baseline.json"
+    recorded = _run_project(environment, project, lockfile, "--json")
+    baseline.write_text(recorded.stdout)
+
+    analysis = _run_project(
+        environment, project, lockfile, "--group", "test", "--report", "rich"
+    )
+    comparison = _run_project(
+        environment,
+        project,
+        lockfile,
+        "--baseline",
+        str(baseline),
+        "--report",
+        "rich",
+    )
+
+    assert recorded.returncode == analysis.returncode == comparison.returncode == 0
+    assert analysis.stdout.startswith("--- Rich Analysis Summary ---\n")
+    assert "Input kind: project-lock" in analysis.stdout
+    assert "Build policy: wheel-only" in analysis.stdout
+    assert "--- Top Distributions (Showing 3 of 3) ---" in analysis.stdout
+    assert "1.0.0" not in analysis.stdout
+    assert comparison.stdout.startswith("--- Rich Comparison Summary ---\n")
+    assert "Input kind: project-lock" in comparison.stdout
+    assert "Lock changed: no" in comparison.stdout
+    assert "lock_identity" not in comparison.stdout
+    _assert_temporary_work_is_cleaned(tmp_path)
+
+
 def test_real_uv_sync_stale_lock_is_sanitized_and_cleans_temporary_prefix(tmp_path):
     project, lockfile, environment = _locked_inputs(tmp_path)
     project_bytes = project.read_bytes()

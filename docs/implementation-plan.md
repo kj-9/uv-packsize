@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Follow-up: CLI text polish（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | F-010 第2段 slice 3: rich summaryのhelp/README/Docs/E2E契約 |
+| 次のタスク | F-010 第3段: quietとstdout/stderr channelの一貫性 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,37 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第2段 slice 3 rich summary公開契約
+
+状態: `done`
+
+変更:
+
+- hiddenだった`--report [standard|rich]`を公開helpへ出し、default `standard`、richのredacted top-five summary、JSON/comparison JSONでは無視される境界を明記した。READMEのCog生成helpを同期し、standard byte互換とrich analysis/comparisonの公開契約を追加した。
+- 利用者Docsへfresh/project-lockのrich利用方法、固定renderer由来の実出力例、top 5、canonical global total、distribution-owned aggregate、completeness、build policy、JSON byte不変、raw requirement/path/version/lock identity/context fingerprint非表示を記載した。
+- redaction契約はrich primary summaryだけを対象とする。後置する既存sectionは対象外であり、`--bin`はscript path、`--explain`はresolved versionとdependency informationを含むinstalled metadataを表示し得ることをREADME、Docs、helpで明記した。
+- real local wheel E2Eでfresh richと`--bin`、`--explain`、`--breakdown`、`--contributions`、budget、baseline writeの合成、rich comparison、analysis/comparison JSONのrich無視を検証した。real locked project E2Eでrich analysis/comparison、lock changed表示、version/lock identity非表示を検証した。
+- Docsのrich例はfixed `AnalysisResult`からpublic projection/rendererで生成し、fixtureとMarkdown code blockの逐語一致を自動テストで固定した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv run --locked pytest tests/test_pages_docs.py tests/test_local_wheel_integration.py tests/test_project_lock_e2e.py tests/test_uv_packsize.py tests/test_project_lock_cli.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは172 passed、全体は924 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict build、lock整合性、diff checkも成功した。
+- default/明示standardの既存契約を変更せず、rich summaryをhuman textだけのopt-inとして公開した。
+
+次のタスク:
+
+- F-010 第3段として、quietとstdout/stderr channelの一貫性を既存machine-readable output契約を保ったまま設計する。
 
 ### 2026-08-12: F-010 第2段 slice 2 opt-in rich summary CLI接続
 

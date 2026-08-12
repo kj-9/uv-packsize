@@ -30,4 +30,17 @@ Project/lock mode supports a conservative subset. Local-path, VCS, and unsupport
 
 Project/lock analysis emits analysis-result schema v3. Its opaque `lock_identity` can correlate identical lock contents but does not expose the lock, paths, sources, URLs, credentials, or opaque uv identifiers. Treat it as correlation metadata when sharing results.
 
+For a concise text view, add `--report rich`:
+
+```bash
+uvx uv-packsize --project pyproject.toml --lockfile uv.lock --report rich
+```
+
+The rich primary summary identifies the input as `project-lock` and reports the
+selected build policy, completeness, totals, and five largest distributions
+without showing versions or lock identity. When comparing a compatible
+baseline, it also reports whether the opaque lock identity changed without
+displaying the identity itself. This statement applies to the primary summary;
+any appended legacy section keeps its existing disclosure contract.
+
 Use a baseline from the same input family; see [Baselines and budgets](baselines-and-budgets.md).

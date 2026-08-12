@@ -2171,11 +2171,17 @@ def test_cli_explain_does_not_mask_programmer_errors(monkeypatch, installed_venv
 
 def test_cli_help_describes_json_and_bin_interaction():
     result = CliRunner().invoke(cli, ["--help"])
+    normalized_help = " ".join(result.output.split())
 
     assert result.exit_code == 0
     assert "--json" in result.output
     assert "Write the versioned analysis result as JSON" in result.output
     assert "stdout." in result.output
+    assert "--report [standard|rich]" in result.output
+    assert (
+        "Rich shows a redacted primary top-five summary; ignored with --json or "
+        "--comparison-json. [default: standard]" in normalized_help
+    )
     assert "--bin" in result.output
     assert "Text output only:" in result.output
     assert "--explain" in result.output

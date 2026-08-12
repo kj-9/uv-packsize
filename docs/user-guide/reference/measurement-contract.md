@@ -36,6 +36,16 @@ Check `schema_version` and `context.input_kind` before consuming or comparing a 
 
 `--json` and `--comparison-json` write exactly one JSON document to standard output on success. Progress and sanitized failures go to standard error.
 
+For human-readable output, `--report standard` is the default and preserves the
+full legacy text layout. `--report rich` is an opt-in, terminal-safe summary
+limited to five distribution rows. Its primary summary exposes aggregate
+measurement facts but not raw requirements, installed paths, resolved versions,
+lock identities, or context fingerprints. This redaction does not cover
+appended legacy sections: `--bin` can display script paths, and `--explain` can
+display installed metadata including resolved versions and dependency
+information. Both JSON modes accept and ignore `--report`, leaving their schema
+and bytes unchanged.
+
 | Status | Meaning |
 | --- | --- |
 | 0 | completed analysis or comparison |

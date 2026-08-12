@@ -79,6 +79,9 @@ Options:
                                   stdout.
   --comparison-json               Write the versioned baseline comparison result
                                   as JSON to stdout.
+  --report [standard|rich]        Text report layout. Rich shows a redacted
+                                  primary top-five summary; ignored with --json
+                                  or --comparison-json.  [default: standard]
   --budget-config PATH            Read budget policy from [tool.uv-
                                   packsize.budget] in PATH.
   --max-total BYTES               Maximum canonical global logical size in
@@ -108,6 +111,31 @@ You can also use:
 python -m uv_packsize --help
 ```
 
+### Report layouts
+
+The default `--report standard` layout preserves the full distribution table
+and the existing text-output contract. Opt in to a compact, redacted summary:
+
+```bash
+uvx uv-packsize requests --report rich
+```
+
+The rich primary summary shows the input kind, build policy, completeness,
+warning count, canonical global size, distribution-owned aggregate, and the
+five largest distributions by owned logical bytes. That primary summary does
+not show raw requirements, installed paths, resolved versions, context
+fingerprints, or lock identities. If more than five distributions were
+measured, its heading states `Showing 5 of N`.
+
+With a baseline, rich mode shows the corresponding redacted comparison summary
+and the five largest non-zero distribution changes. `--bin`, `--explain`,
+`--breakdown`, `--contributions`, budgets, and baseline writing retain their
+existing behavior around the rich primary report. These appended sections are
+not covered by the primary-summary redaction: `--bin` can show script paths,
+and `--explain` can show installed metadata including resolved versions and
+dependency information. `--json` and `--comparison-json` ignore `--report` so
+their versioned output remains byte compatible.
+
 ### Locked project analysis
 
 Use `--project` and `--lockfile` together to measure the dependencies selected
@@ -119,6 +147,7 @@ changes either input file.
 uv-packsize --project pyproject.toml --lockfile uv.lock --json > analysis.json
 uv-packsize --project pyproject.toml --lockfile uv.lock --group test
 uv-packsize --project pyproject.toml --lockfile uv.lock --all-groups --extra docs
+uv-packsize --project pyproject.toml --lockfile uv.lock --report rich
 ```
 
 The default selects no dependency groups. Add a repeatable `--group NAME`, or

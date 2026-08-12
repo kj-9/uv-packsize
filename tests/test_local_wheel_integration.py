@@ -115,6 +115,85 @@ def test_real_uv_install_from_local_wheels_renders_text_and_scripts(tmp_path):
     assert default.stderr == with_scripts.stderr == ""
 
 
+@pytest.mark.skipif(os.name != "posix", reason="atomic baseline writer is POSIX-only")
+def test_real_uv_rich_report_composes_text_features_budget_and_baseline_write(
+    tmp_path,
+):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    baseline = tmp_path / "rich-baseline.json"
+
+    completed = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--report",
+        "rich",
+        "--bin",
+        "--explain",
+        "--breakdown",
+        "--contributions",
+        "--max-total",
+        str(2**63 - 1),
+        "--write-baseline",
+        str(baseline),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.startswith("--- Rich Analysis Summary ---\n")
+    assert "Input kind: fresh-install" in completed.stdout
+    assert "Build policy: wheel-only" in completed.stdout
+    assert "Completeness: complete" in completed.stdout
+    assert "--- Top Distributions (Showing 3 of 3) ---" in completed.stdout
+    assert "--- Package Sizes ---" not in completed.stdout
+    for section in (
+        "--- Binaries in .venv/bin ---",
+        "--- Requested Roots ---",
+        "--- File Category Breakdown ---",
+        "--- Root Contributions ---",
+        "--- Size Budget ---",
+    ):
+        assert section in completed.stdout
+    assert "Result: PASS" in completed.stdout
+    assert json.loads(baseline.read_text())["schema_version"] == 1
+
+
+def test_real_uv_rich_comparison_and_json_ignore_contract(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+    baseline = tmp_path / "baseline.json"
+    standard_json = _run_cli(tmp_path, wheelhouse, "--json")
+    baseline.write_text(standard_json.stdout)
+
+    rich_json = _run_cli(tmp_path, wheelhouse, "--json", "--report", "rich")
+    comparison = _run_cli(
+        tmp_path, wheelhouse, "--baseline", str(baseline), "--report", "rich"
+    )
+    standard_comparison_json = _run_cli(
+        tmp_path, wheelhouse, "--baseline", str(baseline), "--comparison-json"
+    )
+    rich_comparison_json = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--baseline",
+        str(baseline),
+        "--comparison-json",
+        "--report",
+        "rich",
+    )
+
+    assert standard_json.returncode == rich_json.returncode == 0
+    assert standard_json.stdout == rich_json.stdout
+    assert standard_json.stderr == rich_json.stderr
+    assert comparison.returncode == 0, comparison.stderr
+    assert comparison.stdout.startswith("--- Rich Comparison Summary ---\n")
+    assert "Input kind: fresh-install" in comparison.stdout
+    assert "--- Top Changes (Showing 0 of 0) ---" in comparison.stdout
+    assert "No distribution changes." in comparison.stdout
+    assert standard_comparison_json.returncode == rich_comparison_json.returncode == 0
+    assert standard_comparison_json.stdout == rich_comparison_json.stdout
+    assert standard_comparison_json.stderr == rich_comparison_json.stderr
+
+
 def test_real_uv_install_from_local_wheels_explains_shared_dependency(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)

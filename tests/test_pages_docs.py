@@ -17,6 +17,7 @@ from uv_packsize.models import (
     ResolutionContext,
 )
 from uv_packsize.render import render_analysis_report
+from uv_packsize.rich_report import project_rich_analysis, render_rich_analysis_report
 
 PROJECT_ROOT = Path(__file__).parent.parent
 PAGES_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "pages.yml"
@@ -26,6 +27,9 @@ LOCKFILE = PROJECT_ROOT / "uv.lock"
 HOME_PAGE = PROJECT_ROOT / "docs" / "user-guide" / "index.md"
 SAMPLE_REPORT = (
     PROJECT_ROOT / "tests" / "fixtures" / "docs" / "sample-analysis-report.txt"
+)
+SAMPLE_RICH_REPORT = (
+    PROJECT_ROOT / "tests" / "fixtures" / "docs" / "sample-rich-analysis-report.txt"
 )
 
 
@@ -104,6 +108,23 @@ def test_user_guide_builds_without_strict_warnings(tmp_path):
 
 
 def test_home_page_embeds_a_tested_cli_report_example():
+    result = _sample_analysis_result()
+    report = render_analysis_report(result)
+
+    assert SAMPLE_REPORT.read_text().rstrip() == report
+    assert f"```text\n{report}\n```" in HOME_PAGE.read_text()
+
+
+def test_measuring_guide_embeds_a_tested_rich_report_example():
+    result = _sample_analysis_result()
+    report = render_rich_analysis_report(project_rich_analysis(result))
+    guide = (PROJECT_ROOT / "docs" / "user-guide" / "measuring-packages.md").read_text()
+
+    assert SAMPLE_RICH_REPORT.read_text().rstrip() == report
+    assert f"```text\n{report}\n```" in guide
+
+
+def _sample_analysis_result() -> AnalysisResult:
     context = ResolutionContext(
         requirements=("sample",),
         python_version="3.12.4",
@@ -122,13 +143,9 @@ def test_home_page_embeds_a_tested_cli_report_example():
         category=FileCategory.PYTHON,
         origin=FileOrigin.RECORD,
     )
-    result = AnalysisResult(
+    return AnalysisResult(
         context=context,
         distributions=(
             DistributionResult(name="sample", version="1.0.0", files=(file_entry,)),
         ),
     )
-    report = render_analysis_report(result)
-
-    assert SAMPLE_REPORT.read_text().rstrip() == report
-    assert f"```text\n{report}\n```" in HOME_PAGE.read_text()

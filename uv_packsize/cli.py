@@ -422,7 +422,11 @@ def _explanation_failure_message(error: Exception) -> str:
     "report_format",
     type=click.Choice(["standard", "rich"]),
     default="standard",
-    hidden=True,
+    show_default=True,
+    help=(
+        "Text report layout. Rich shows a redacted primary top-five summary; "
+        "ignored with --json or --comparison-json."
+    ),
 )
 @click.option(
     "--budget-config",
