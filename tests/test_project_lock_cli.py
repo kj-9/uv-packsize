@@ -154,6 +154,22 @@ def test_project_lock_rich_text_report_replaces_the_standard_primary(monkeypatch
     )
 
 
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_project_lock_quiet_keeps_final_text_and_suppresses_progress(
+    monkeypatch, report_format
+):
+    _project_double(monkeypatch)
+
+    result = CliRunner().invoke(cli, _arguments("--report", report_format, "--quiet"))
+
+    assert result.exit_code == 0
+    expected = (
+        "Package Sizes" if report_format == "standard" else "Rich Analysis Summary"
+    )
+    assert expected in result.stdout
+    assert result.stderr == ""
+
+
 def test_project_lock_forwards_an_explicit_python_selection_to_the_bridge(monkeypatch):
     _project_double(monkeypatch, expected_python="3.14")
 
@@ -214,6 +230,32 @@ def test_project_lock_comparison_json_ignores_rich_report(monkeypatch, tmp_path)
     assert default.exit_code == rich.exit_code == 0
     assert default.stdout == rich.stdout
     assert default.stderr == rich.stderr
+
+
+def test_project_lock_quiet_json_and_comparison_preserve_stdout_bytes(
+    monkeypatch, tmp_path
+):
+    _project_double(monkeypatch)
+    baseline = tmp_path / "project-baseline.json"
+    default_json = CliRunner().invoke(cli, _arguments("--json"))
+    quiet_json = CliRunner().invoke(cli, _arguments("--json", "--quiet"))
+
+    assert quiet_json.exit_code == default_json.exit_code == 0
+    assert quiet_json.stdout == default_json.stdout
+    assert quiet_json.stderr == ""
+    baseline.write_text(default_json.stdout)
+
+    default_comparison = CliRunner().invoke(
+        cli, _arguments("--baseline", str(baseline), "--comparison-json")
+    )
+    quiet_comparison = CliRunner().invoke(
+        cli,
+        _arguments("--baseline", str(baseline), "--comparison-json", "--quiet"),
+    )
+
+    assert quiet_comparison.exit_code == default_comparison.exit_code == 0
+    assert quiet_comparison.stdout == default_comparison.stdout
+    assert quiet_comparison.stderr == ""
 
 
 @pytest.mark.parametrize(

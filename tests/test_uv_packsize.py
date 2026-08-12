@@ -363,7 +363,7 @@ def _mock_successful_uv_version(monkeypatch):
     )
 
 
-def _run_local_layout(  # noqa: PLR0912, PLR0913
+def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
     monkeypatch,
     installed_venv,
     package_names,
@@ -383,19 +383,23 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913
     max_increase=None,
     incomplete_policy=None,
     report_format=None,
+    quiet=False,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
 
-    def create_venv(venv_dir, _python=None, *, err=False):
+    def create_venv(venv_dir, _python=None, *, err=False, quiet=False):
         assert err is (
             json_output or baseline is not None or write_baseline is not None
         )
-        click.echo("Creating virtual environment...", err=err)
+        if not quiet:
+            click.echo("Creating virtual environment...", err=err)
         shutil.copytree(venv_path, venv_dir, symlinks=True)
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
-    def install_package(_python_executable, names, *, build_policy, err=False):
+    def install_package(
+        _python_executable, names, *, build_policy, err=False, quiet=False
+    ):
         assert err is (
             json_output or baseline is not None or write_baseline is not None
         )
@@ -406,10 +410,11 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913
         package_count = len(names)
         package_label = "package" if package_count == 1 else "packages"
         possessive = "its" if package_count == 1 else "their"
-        click.echo(
-            f"Installing {package_count} requested {package_label} and {possessive} dependencies...",
-            err=err,
-        )
+        if not quiet:
+            click.echo(
+                f"Installing {package_count} requested {package_label} and {possessive} dependencies...",
+                err=err,
+            )
 
     monkeypatch.setattr("uv_packsize.cli._create_venv", create_venv)
     monkeypatch.setattr("uv_packsize.cli._install_package", install_package)
@@ -445,6 +450,8 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913
         arguments.extend(("--incomplete-policy", incomplete_policy))
     if report_format is not None:
         arguments.extend(("--report", report_format))
+    if quiet:
+        arguments.append("--quiet")
     return CliRunner().invoke(cli, arguments)
 
 
@@ -1735,6 +1742,247 @@ def test_cli_rich_budget_failure_keeps_primary_before_budget_section(
     assert "--- Package Sizes ---" not in result.stdout
 
 
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_quiet_suppresses_only_fresh_text_progress(
+    monkeypatch, installed_venv, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format=report_format,
+        quiet=True,
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    expected_title = (
+        "Package Sizes" if report_format == "standard" else "Rich Analysis Summary"
+    )
+    assert expected_title in result.stdout
+    for status in (
+        "Calculating size",
+        "Creating virtual environment",
+        "Installing 1 requested package",
+        "Analyzing sizes",
+        "Calculation complete",
+    ):
+        assert status not in result.output
+
+
+def test_cli_quiet_json_preserves_stdout_bytes_and_suppresses_stderr_progress(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    quiet = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        quiet=True,
+        report_format="rich",
+    )
+
+    assert default.exit_code == quiet.exit_code == 0
+    assert quiet.stdout == default.stdout
+    assert quiet.stderr == ""
+
+
+def test_cli_quiet_graph_and_write_keep_final_report_and_baseline(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    target = tmp_path / "baseline.json"
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format="rich",
+        explain=True,
+        breakdown=True,
+        contributions=True,
+        write_baseline=target,
+        quiet=True,
+    )
+
+    assert result.exit_code == 0
+    assert "--- Rich Analysis Summary ---" in result.stdout
+    assert "--- Requested Roots ---" in result.stdout
+    assert "--- File Category Breakdown ---" in result.stdout
+    assert "--- Root Contributions ---" in result.stdout
+    assert result.stderr == ""
+    assert json.loads(target.read_text())["schema_version"] == 1
+
+
+def test_cli_quiet_json_write_preserves_stdout_and_baseline_bytes(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    default_target = tmp_path / "default.json"
+    quiet_target = tmp_path / "quiet.json"
+
+    default = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        write_baseline=default_target,
+    )
+    quiet = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        write_baseline=quiet_target,
+        quiet=True,
+    )
+
+    assert quiet.exit_code == default.exit_code == 0
+    assert quiet.stdout == default.stdout
+    assert quiet_target.read_bytes() == default_target.read_bytes()
+    assert quiet.stderr == ""
+
+
+def test_cli_quiet_comparison_json_preserves_bytes_and_suppresses_progress(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    baseline.write_text(initial.stdout)
+
+    default = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+    )
+    quiet = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+        quiet=True,
+    )
+
+    assert default.exit_code == quiet.exit_code == 0
+    assert quiet.stdout == default.stdout
+    assert quiet.stderr == ""
+
+
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_quiet_text_comparison_keeps_final_report(
+    monkeypatch, installed_venv, tmp_path, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    baseline.write_text(initial.stdout)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        report_format=report_format,
+        quiet=True,
+    )
+
+    assert result.exit_code == 0
+    expected = (
+        "Size Comparison" if report_format == "standard" else "Rich Comparison Summary"
+    )
+    assert expected in result.stdout
+    assert result.stderr == ""
+
+
+def test_cli_quiet_json_budget_violation_keeps_budget_and_error(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        max_total=0,
+        quiet=True,
+    )
+
+    assert result.exit_code == 5
+    assert result.stdout == ""
+    assert "--- Size Budget ---" in result.stderr
+    assert "Error: Size budget was exceeded." in result.stderr
+    assert "Calculating size" not in result.stderr
+
+
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_quiet_text_budget_violation_keeps_report_budget_and_error(
+    monkeypatch, installed_venv, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format=report_format,
+        max_total=0,
+        quiet=True,
+    )
+
+    assert result.exit_code == 5
+    expected = (
+        "Package Sizes" if report_format == "standard" else "Rich Analysis Summary"
+    )
+    assert expected in result.stdout
+    assert "--- Size Budget ---" in result.stdout
+    assert "Error: Size budget was exceeded." in result.stderr
+    assert "Calculating size" not in result.output
+
+
+def test_cli_quiet_operational_failure_keeps_error_and_empty_stdout(
+    monkeypatch, installed_venv
+):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "uv_packsize.cli._create_venv",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            UvCommandError(("uv", "venv"), 7, "", "private failure")
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["--json", "--quiet", "sample==1.0"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Could not create the virtual environment (uv exit code 7)." in result.stderr
+    assert "Calculating size" not in result.stderr
+    assert "private failure" not in result.stderr
+
+
 def test_cli_json_writes_only_the_stable_serializer_to_stdout(
     monkeypatch, installed_venv
 ):
@@ -2688,6 +2936,15 @@ def test_package_name_is_required():
     assert "Missing argument 'PACKAGE_NAMES...'" in result.output
 
 
+def test_cli_quiet_keeps_click_usage_errors():
+    result = CliRunner().invoke(cli, ["--quiet"])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.stderr
+    assert "Missing argument 'PACKAGE_NAMES...'" in result.stderr
+    assert result.stdout == ""
+
+
 def _prefix_arguments(venv_path, site_packages, *additional):
     return [
         "--prefix",
@@ -2737,6 +2994,30 @@ def test_cli_prefix_rich_report_marks_build_policy_unknown(monkeypatch, installe
     assert "--- Package Sizes ---" not in result.stdout
 
 
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_prefix_quiet_keeps_final_text_and_suppresses_progress(
+    installed_venv, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = CliRunner().invoke(
+        cli,
+        _prefix_arguments(
+            venv_path, site_packages, "--report", report_format, "--quiet"
+        ),
+    )
+
+    assert result.exit_code == 0
+    expected = (
+        "Package Sizes" if report_format == "standard" else "Rich Analysis Summary"
+    )
+    assert expected in result.stdout
+    assert "Analyzing existing prefix" not in result.output
+    assert "Existing prefix analysis complete" not in result.output
+    assert result.stderr == ""
+
+
 def test_cli_prefix_json_uses_v2_and_hides_prefix(monkeypatch, installed_venv):
     venv_path, _python, site_packages = installed_venv
     _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
@@ -2758,6 +3039,25 @@ def test_cli_prefix_json_uses_v2_and_hides_prefix(monkeypatch, installed_venv):
         result.stderr
         == "Analyzing existing prefix...\n\nExisting prefix analysis complete.\n"
     )
+
+
+def test_cli_prefix_quiet_json_preserves_stdout_bytes(installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    default = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--json")
+    )
+    quiet = CliRunner().invoke(
+        cli,
+        _prefix_arguments(
+            venv_path, site_packages, "--json", "--report", "rich", "--quiet"
+        ),
+    )
+
+    assert quiet.exit_code == default.exit_code == 0
+    assert quiet.stdout == default.stdout
+    assert quiet.stderr == ""
 
 
 def test_cli_prefix_json_ignores_text_presentation_options(installed_venv):

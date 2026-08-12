@@ -65,6 +65,22 @@ can display installed metadata including resolved versions and dependency
 information. `--json` and `--comparison-json` ignore `--report`, preserving
 their versioned output bytes.
 
+## Suppress progress messages
+
+Use `--quiet` when a script needs only the final report or JSON document:
+
+```bash
+uvx uv-packsize requests --quiet
+uvx uv-packsize requests --json --quiet > analysis.json
+```
+
+Quiet mode suppresses transient progress and completion messages across fresh,
+project/lock, and existing-prefix analysis. It does not suppress final standard
+or rich text, graph explanation sections, budget output, sanitized errors, or
+Click usage errors. Baseline comparison and writing keep their final output and
+file behavior. For `--json` and `--comparison-json`, stdout is byte-identical
+with and without `--quiet`; only routine stderr progress is removed.
+
 ## Save JSON
 
 ```bash

@@ -10,7 +10,7 @@
 |---|---|
 | 現在のPhase | Follow-up: CLI text polish（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | F-010 第3段: quietとstdout/stderr channelの一貫性 |
+| 次のタスク | F-010 第4段: TTY colorを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第3段 `--quiet` progress suppression
+
+状態: `done`
+
+変更:
+
+- 全入力mode共通のprivate progress helperを追加し、`--quiet`では一時的な進捗と完了messageだけを抑止するようにした。既定値はfalseであり、option未指定時の既存stdout/stderr、exit code、text/JSON bytesは変更しない。
+- fresh install、project/lock、existing prefixのstandard/rich report、analysis/comparison JSON、baseline comparison/write、budget、dependency graph説明へquiet契約を接続した。final report、JSON、budget section、sanitized operational error、Click usage errorはprogress helperで包まず、quietでも維持する。
+- JSONとcomparison JSONはquiet有無でstdout bytesが一致し、baseline write先も同一bytesになることを固定した。失敗時は既存exit statusとstdout-empty規則を維持する。
+- READMEの生成helpと公開契約、MkDocsのpackage測定guideとmeasurement contractへquietの適用範囲を追加した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-quiet-cache uv run --locked pytest tests/test_uv_packsize.py tests/test_project_lock_cli.py tests/test_pages_docs.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-quiet-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-quiet-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-quiet-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは167 passed、全体は943 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict build、lock整合性、diff checkも成功した。
+- quietはprogressだけを抑止し、final text/JSON/budget/error/usageと既存channel/exit規則を保持することを全入力modeで検証した。
+
+次のタスク:
+
+- F-010 第4段として、非TTY、明示的なcolor無効化、既存ASCII bytesを守るTTY color契約を設計する。
 
 ### 2026-08-12: F-010 第2段 slice 3 rich summary公開契約
 
@@ -2941,5 +2971,5 @@ uv run --locked python scripts/verify_build.py dist
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
-| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。第1段のterminal-safe共通display/table primitivesは完了した。次は、JSONと既存text契約を不変にするopt-in rich summary reportを設計し、その後quiet/stdout/stderr channelの一貫性、TTY colorへ進む | リリース後のCLI text polish | `in_progress` |
+| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。terminal-safe共通display/table primitives、opt-in rich summary、progressだけを抑止する`--quiet`は完了した。次は非TTYと既存ASCII bytesを守るTTY color契約を設計する | リリース後のCLI text polish | `in_progress` |
 | F-011 | GitHub Actionsが`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告を出している。現時点はGitHub側のNode 24強制実行で挙動を変えず、upstreamの正式なNode 24対応majorが出た時点でpinned action majorを更新する | upstream releaseの監視と後続upgrade | `todo` |

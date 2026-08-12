@@ -82,6 +82,8 @@ Options:
   --report [standard|rich]        Text report layout. Rich shows a redacted
                                   primary top-five summary; ignored with --json
                                   or --comparison-json.  [default: standard]
+  --quiet                         Suppress progress messages without changing
+                                  final output or errors.
   --budget-config PATH            Read budget policy from [tool.uv-
                                   packsize.budget] in PATH.
   --max-total BYTES               Maximum canonical global logical size in
@@ -135,6 +137,24 @@ not covered by the primary-summary redaction: `--bin` can show script paths,
 and `--explain` can show installed metadata including resolved versions and
 dependency information. `--json` and `--comparison-json` ignore `--report` so
 their versioned output remains byte compatible.
+
+### Quiet progress
+
+Add `--quiet` to suppress only transient progress and completion messages:
+
+```bash
+uvx uv-packsize requests --quiet
+uvx uv-packsize requests --json --quiet > analysis.json
+```
+
+This applies consistently to fresh installs, project/lock analysis, and
+existing-prefix analysis, with either text report layout and during baseline
+comparison or writing. Final text reports, JSON documents, graph explanation
+sections, budget results, sanitized operational errors, and Click usage errors
+are not suppressed. In JSON modes, `--quiet` changes only stderr progress;
+successful stdout bytes are identical to the corresponding command without
+`--quiet`. The option is useful for scripts that want diagnostics on failure
+without routine status messages.
 
 ### Locked project analysis
 
@@ -290,6 +310,9 @@ progress messages, text table, or completion message. Progress and sanitized
 operational errors are written to standard error instead. A successful analysis
 exits with status 0; an operational failure exits with status 1 and leaves
 standard output empty; invalid command-line usage uses Click's status 2.
+Add `--quiet` to omit only those stderr progress messages. It does not change
+the JSON bytes, exit status, sanitized errors, budget diagnostics, or usage
+errors.
 `--bin` is a text-presentation option and has no effect on JSON bytes, so
 `--json --bin` is accepted but produces the same JSON as `--json`.
 `--explain` is also text-only: `--json --explain` is accepted and produces

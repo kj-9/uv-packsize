@@ -199,8 +199,15 @@ def _run_uv(command):
     return result
 
 
-def _create_venv(venv_dir, python=None, *, err=False):
-    click.echo("Creating virtual environment...", err=err)
+def _progress(message: str, *, quiet: bool, err: bool = False) -> None:
+    """Emit one transient status line unless progress was explicitly disabled."""
+
+    if not quiet:
+        click.echo(message, err=err)
+
+
+def _create_venv(venv_dir, python=None, *, err=False, quiet=False):
+    _progress("Creating virtual environment...", quiet=quiet, err=err)
 
     command = ["uv", "venv"]
     if python:
@@ -220,13 +227,15 @@ def _install_package(
     *,
     build_policy: BuildPolicy,
     err=False,
+    quiet=False,
 ):
     """Install requirements according to the explicit build permission."""
     package_count = len(package_names)
     package_label = "package" if package_count == 1 else "packages"
     possessive = "its" if package_count == 1 else "their"
-    click.echo(
+    _progress(
         f"Installing {package_count} requested {package_label} and {possessive} dependencies...",
+        quiet=quiet,
         err=err,
     )
     install_command = [
@@ -429,6 +438,11 @@ def _explanation_failure_message(error: Exception) -> str:
     ),
 )
 @click.option(
+    "--quiet",
+    is_flag=True,
+    help="Suppress progress messages without changing final output or errors.",
+)
+@click.option(
     "--budget-config",
     type=click.Path(path_type=Path),
     help="Read budget policy from [tool.uv-packsize.budget] in PATH.",
@@ -498,6 +512,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     json_output,
     comparison_json,
     report_format,
+    quiet,
     budget_config,
     max_total,
     max_increase,
@@ -592,6 +607,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             bin=bin,
             json_output=json_output,
             report_format=report_format,
+            quiet=quiet,
         )
         return
 
@@ -613,6 +629,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             policy=policy,
             bin=bin,
             report_format=report_format,
+            quiet=quiet,
         )
         return
 
@@ -631,8 +648,9 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     compare_mode = comparison_baseline is not None
     write_mode = write_baseline_path is not None
     progress_to_stderr = json_output or compare_mode or write_mode
-    click.echo(
+    _progress(
         f"Calculating size for {package_count} requested {package_label}...",
+        quiet=quiet,
         err=progress_to_stderr,
     )
     build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
@@ -641,13 +659,17 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         venv_dir = os.path.join(tmpdir, "venv")
         try:
             python_executable = _create_venv(
-                venv_dir, python_version, err=progress_to_stderr
+                venv_dir,
+                python_version,
+                err=progress_to_stderr,
+                quiet=quiet,
             )
             _install_package(
                 python_executable,
                 package_names,
                 build_policy=build_policy,
                 err=progress_to_stderr,
+                quiet=quiet,
             )
             uv_version = _uv_version()
         except UvCommandError as error:
@@ -657,7 +679,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         except UvVersionError:
             raise click.ClickException("Could not determine the uv version.") from None
 
-        click.echo("Analyzing sizes...", err=progress_to_stderr)
+        _progress("Analyzing sizes...", quiet=quiet, err=progress_to_stderr)
         try:
             environment = discover_installed_environment(
                 venv_path=Path(venv_dir),
@@ -692,7 +714,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 ) from None
 
         if comparison_baseline is not None:
-            click.echo("Comparing with baseline...", err=True)
+            _progress("Comparing with baseline...", quiet=quiet, err=True)
             try:
                 assert current_baseline is not None
                 diff = compare_baselines(comparison_baseline, current_baseline)
@@ -755,7 +777,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 click.echo(render_analysis_json(result), nl=False)
         elif explain or breakdown or contributions:
             if explain:
-                click.echo("Explaining dependencies...", err=write_mode)
+                _progress("Explaining dependencies...", quiet=quiet, err=write_mode)
             try:
                 graph = build_installed_dependency_graph(result, environment)
                 explained = explain_dependency_paths(result, graph)
@@ -827,7 +849,11 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             )
             click.echo(report)
 
-    click.echo("\nCalculation complete.", err=json_output or write_mode)
+    _progress(
+        "\nCalculation complete.",
+        quiet=quiet,
+        err=json_output or write_mode,
+    )
 
 
 def _write_fresh_baseline_if_requested(
@@ -1140,6 +1166,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
     policy: BudgetPolicy | None,
     bin: bool,
     report_format: str,
+    quiet: bool,
 ) -> None:
     """Run the project-lock path without reopening validated input bytes."""
 
@@ -1164,8 +1191,10 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
     write_mode = write_baseline_path is not None
     # Project-lock failures must never contaminate stdout, including text mode.
     progress_to_stderr = True
-    click.echo(
-        "Calculating size for the selected project lock...", err=progress_to_stderr
+    _progress(
+        "Calculating size for the selected project lock...",
+        quiet=quiet,
+        err=progress_to_stderr,
     )
     build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
     try:
@@ -1177,10 +1206,14 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
     except UvVersionError:
         raise click.ClickException("Could not determine the uv version.") from None
 
-    click.echo("Installing the selected project lock...", err=progress_to_stderr)
+    _progress(
+        "Installing the selected project lock...",
+        quiet=quiet,
+        err=progress_to_stderr,
+    )
 
     def collect_inventory(target: Path):
-        click.echo("Analyzing sizes...", err=progress_to_stderr)
+        _progress("Analyzing sizes...", quiet=quiet, err=progress_to_stderr)
         environment = discover_installed_environment(
             venv_path=target,
             # The environment adapter currently constructs a fresh context as
@@ -1224,7 +1257,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
                 "Could not evaluate the analysis result."
             ) from None
     if baseline is not None:
-        click.echo("Comparing with baseline...", err=True)
+        _progress("Comparing with baseline...", quiet=quiet, err=True)
         try:
             assert current_baseline is not None
             diff = compare_baselines(baseline, current_baseline)
@@ -1281,7 +1314,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
             write_baseline_path, result, overwrite_baseline
         )
         click.echo(report)
-    click.echo("\nCalculation complete.", err=progress_to_stderr)
+    _progress("\nCalculation complete.", quiet=quiet, err=progress_to_stderr)
 
 
 def _write_project_lock_baseline_if_requested(
@@ -1344,10 +1377,11 @@ def _run_prefix_analysis(  # noqa: PLR0913
     bin: bool,
     json_output: bool,
     report_format: str,
+    quiet: bool,
 ) -> None:
     """Analyze an existing prefix without invoking uv or an interpreter."""
 
-    click.echo("Analyzing existing prefix...", err=json_output)
+    _progress("Analyzing existing prefix...", quiet=quiet, err=json_output)
     try:
         environment = discover_existing_prefix(
             prefix=prefix,
@@ -1377,4 +1411,4 @@ def _run_prefix_analysis(  # noqa: PLR0913
                 binaries_title="Binaries in prefix",
             )
         )
-    click.echo("\nExisting prefix analysis complete.", err=json_output)
+    _progress("\nExisting prefix analysis complete.", quiet=quiet, err=json_output)

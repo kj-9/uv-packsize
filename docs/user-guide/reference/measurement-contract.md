@@ -36,6 +36,13 @@ Check `schema_version` and `context.input_kind` before consuming or comparing a 
 
 `--json` and `--comparison-json` write exactly one JSON document to standard output on success. Progress and sanitized failures go to standard error.
 
+`--quiet` suppresses progress and completion messages only. It applies to all
+input modes and both text layouts, including comparison and baseline-writing
+flows. Final text or JSON, budget diagnostics, sanitized operational errors,
+Click usage errors, and exit statuses remain visible. Successful JSON stdout is
+byte-identical with and without `--quiet`; failures retain their existing
+stdout-empty rules.
+
 For human-readable output, `--report standard` is the default and preserves the
 full legacy text layout. `--report rich` is an opt-in, terminal-safe summary
 limited to five distribution rows. Its primary summary exposes aggregate
