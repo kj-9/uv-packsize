@@ -5,11 +5,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+from uv_packsize.models import (
+    AnalysisResult,
+    BuildPolicy,
+    CaseRule,
+    DistributionResult,
+    FileCategory,
+    FileEntry,
+    FileOrigin,
+    PathFlavor,
+    ResolutionContext,
+)
+from uv_packsize.render import render_analysis_report
+
 PROJECT_ROOT = Path(__file__).parent.parent
 PAGES_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "pages.yml"
 MKDOCS_CONFIG = PROJECT_ROOT / "mkdocs.yml"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 LOCKFILE = PROJECT_ROOT / "uv.lock"
+HOME_PAGE = PROJECT_ROOT / "docs" / "user-guide" / "index.md"
+SAMPLE_REPORT = (
+    PROJECT_ROOT / "tests" / "fixtures" / "docs" / "sample-analysis-report.txt"
+)
 
 
 def test_pages_workflow_builds_strict_mkdocs_then_deploys_with_least_privilege():
@@ -84,3 +101,34 @@ def test_user_guide_builds_without_strict_warnings(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     assert (tmp_path / "site" / "index.html").is_file()
+
+
+def test_home_page_embeds_a_tested_cli_report_example():
+    context = ResolutionContext(
+        requirements=("sample",),
+        python_version="3.12.4",
+        platform="linux",
+        architecture="x86_64",
+        path_flavor=PathFlavor.POSIX,
+        case_rule=CaseRule.SENSITIVE,
+        uv_version="0.11.3",
+        build_policy=BuildPolicy.WHEEL_ONLY,
+        compile_bytecode=True,
+    )
+    file_entry = FileEntry(
+        path="site-packages/sample.py",
+        canonical_identity="site-packages/sample.py",
+        logical_bytes=1536,
+        category=FileCategory.PYTHON,
+        origin=FileOrigin.RECORD,
+    )
+    result = AnalysisResult(
+        context=context,
+        distributions=(
+            DistributionResult(name="sample", version="1.0.0", files=(file_entry,)),
+        ),
+    )
+    report = render_analysis_report(result)
+
+    assert SAMPLE_REPORT.read_text().rstrip() == report
+    assert f"```text\n{report}\n```" in HOME_PAGE.read_text()

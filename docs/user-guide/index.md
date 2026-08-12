@@ -1,48 +1,32 @@
-<div class="landing-hero" markdown>
+# uv-packsize
 
-<p class="landing-kicker">Python dependency footprint</p>
+Measure the installed logical size of a Python package and its dependencies with [uv](https://docs.astral.sh/uv/).
 
-# Know what your dependencies cost.
+```bash
+uvx uv-packsize requests
+```
 
-Measure the installed logical size of Python packages and their dependencies with [uv](https://docs.astral.sh/uv/). `uv-packsize` installs an isolated dependency set, attributes its files to distributions, and turns the result into a reviewable record.
+The command creates an isolated temporary environment, installs the requested dependency set, and prints a report like this:
 
-[Get started](getting-started.md){ .md-button .md-button--primary }
-[View the source](https://github.com/kj-9/uv-packsize){ .md-button }
+```text
+--- Package Sizes ---
+Package                 Size
+------------------  --------
+sample              1.50 KiB
+------------------  --------
+Total Package Size  1.50 KiB
 
-</div>
+Total size:  1.50 KiB
+```
 
-<div class="grid cards" markdown>
+This is an actual report rendered from a fixed test fixture. Your package names, resolved dependencies, and sizes will differ.
 
--   :material-scale-balance: **Measure installed bytes**
+## Common tasks
 
-    Report installed logical size—not a wheel download size or allocated disk usage. The Python interpreter, virtual-environment scaffolding, and uv cache are excluded.
+- [Get started](getting-started.md) — run it once or install it as a tool.
+- [Measure packages](measuring-packages.md) — use text views, JSON, or an existing prefix.
+- [Measure a locked project](locked-projects.md) — analyze explicit `pyproject.toml` and `uv.lock` inputs.
+- [Compare a baseline or enforce a budget](baselines-and-budgets.md).
+- [Add a CI check](ci.md).
 
--   :material-file-search-outline: **Explain the total**
-
-    Inspect distributions, file categories, dependency paths, and root contributions to understand why a footprint changed.
-
--   :material-shield-check-outline: **Keep CI honest**
-
-    Compare a locked project with a baseline and fail a build when a reviewed size budget is exceeded.
-
-</div>
-
-!!! tip "Start with one command"
-
-    ```bash
-    uvx uv-packsize requests
-    ```
-
-    Use [`uv tool install uv-packsize`](getting-started.md#install-it-as-a-tool) when you want a persistent command.
-
-## From a quick check to a repeatable policy
-
-<div class="landing-journey" markdown>
-
-1.  **[Measure a package](measuring-packages.md)** to see its installed footprint.
-2.  **[Analyze a locked project](locked-projects.md)** to measure the dependencies your project actually selected.
-3.  **[Record a baseline and budget](baselines-and-budgets.md)** to make growth visible in CI.
-
-</div>
-
-Source builds are disabled by default. Read [Safety and limitations](reference/safety-and-limitations.md) before using `--allow-build`.
+The total is installed logical size, not a wheel download size or allocated disk usage. The Python interpreter, virtual-environment scaffolding, and uv cache are excluded. Source builds are disabled by default; see [Safety and limitations](reference/safety-and-limitations.md) before using `--allow-build`.

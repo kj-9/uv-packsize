@@ -1,0 +1,8 @@
+--- Package Sizes ---
+Package                 Size
+------------------  --------
+sample              1.50 KiB
+------------------  --------
+Total Package Size  1.50 KiB
+
+Total size:  1.50 KiB

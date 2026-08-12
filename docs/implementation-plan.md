@@ -906,6 +906,21 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ## 作業記録
 
+### 2026-08-12: 利用者向けDocs Homeの実用化
+
+状態: `done`
+
+変更:
+
+- Homeを装飾中心のランディングページから、最短の実行コマンド、実際のCLI report、用途別の導線を先頭に置く実用ページへ簡潔化した。
+- 実出力例は、fixed `AnalysisResult`から現行rendererが生成するreportをfixtureとして固定し、Homeのコードブロックと逐語一致することをテストした。実行環境により変わるpackage名・解決結果・sizeを固定値であるかのように示さない。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache uv run --locked pytest tests/test_pages_docs.py -q` — 5 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache make docs-check` — 成功（MkDocs strict build。MaterialのMkDocs 2.0に関するupstream noticeはstderrのみで、exit status 0）。
+- `git diff --check` — 成功。
+
 ### 2026-08-12: 利用者向けDocsのMkDocs移行
 
 状態: `done`
@@ -2802,3 +2817,4 @@ uv run --locked python scripts/verify_build.py dist
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
+| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。順序は、(1) terminal-safe共通display/table primitives（既存ASCII outputのbytesを維持）、(2) opt-in rich summary report（JSONと既存text契約を不変）、(3) quietとstdout/stderr channelの一貫性、(4) TTY colorとする | リリース後のCLI text polish | `todo` |
