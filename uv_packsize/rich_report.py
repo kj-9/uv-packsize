@@ -651,7 +651,7 @@ def _comparison_aggregate_notes(view: RichComparisonView) -> tuple[str, ...]:
 
 def _render_top_distributions(view: RichAnalysisView) -> str:
     heading = (
-        "--- Top Distributions "
+        "--- Largest Distributions "
         f"(Showing {len(view.top_distributions)} of {view.distribution_count}) ---"
     )
     if not view.top_distributions:
@@ -673,7 +673,7 @@ def _render_top_distributions(view: RichAnalysisView) -> str:
 
 def _render_top_changes(view: RichComparisonView) -> str:
     heading = (
-        "--- Top Changes "
+        "--- Largest Distribution Changes "
         f"(Showing {len(view.top_changes)} of {view.distribution_change_count}) ---"
     )
     if not view.top_changes:

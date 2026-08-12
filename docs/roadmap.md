@@ -6,6 +6,14 @@
 
 ## 0.2.0 安定版リリース
 
+### Text output migration
+
+`0.2.0`ではhuman-readable outputのdefaultを`--report rich --color auto`へ
+変更する。redirect、`TERM=dumb`、`NO_COLOR`ではdefault outputはplainのままで、
+TTYだけを自動装飾する。従来のfull plain-text tableが必要な利用者は
+`--report standard --color never`を明示する。`--json`と`--comparison-json`は
+この移行を完全に無視し、bytes、channel、TTY検査を変更しない。
+
 Phase 2〜6で追加した測定inventory、versioned JSON、baseline/budget、locked
 project analysisは、公開済みの`0.1.1`から機能範囲が大きく広がる。最初の先行
 `0.2.0a1`はGitHub pre-releaseでCIがpublish前に失敗したため、tagを付け替えず

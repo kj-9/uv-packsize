@@ -96,8 +96,16 @@ def test_real_uv_install_from_local_wheels_renders_text_and_scripts(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
 
-    default = _run_cli(tmp_path, wheelhouse)
-    with_scripts = _run_cli(tmp_path, wheelhouse, "--bin")
+    default = _run_cli(tmp_path, wheelhouse, "--report", "standard", "--color", "never")
+    with_scripts = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--bin",
+        "--report",
+        "standard",
+        "--color",
+        "never",
+    )
 
     assert default.returncode == with_scripts.returncode == 0
     assert _table_names(default.stdout, "Package Sizes") == {
@@ -114,6 +122,19 @@ def test_real_uv_install_from_local_wheels_renders_text_and_scripts(tmp_path):
     )
     assert _reported_total(default.stdout) == _reported_total(with_scripts.stdout)
     assert default.stderr == with_scripts.stderr == ""
+
+
+def test_real_uv_default_text_is_plain_rich_when_stdout_is_redirected(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    build_wheelhouse(wheelhouse)
+
+    completed = _run_cli(tmp_path, wheelhouse)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--- Rich Analysis Summary ---" in completed.stdout
+    assert "--- Largest Distributions (Showing 3 of 3) ---" in completed.stdout
+    assert "--- Package Sizes ---" not in completed.stdout
+    assert "\x1b[" not in completed.stdout
 
 
 @pytest.mark.skipif(os.name != "posix", reason="atomic baseline writer is POSIX-only")
@@ -148,7 +169,7 @@ def test_real_uv_rich_report_composes_text_features_budget_and_baseline_write(
     assert "Input kind: fresh-install" in plain_stdout
     assert "Build policy: wheel-only" in plain_stdout
     assert "Completeness: complete" in plain_stdout
-    assert "--- Top Distributions (Showing 3 of 3) ---" in plain_stdout
+    assert "--- Largest Distributions (Showing 3 of 3) ---" in plain_stdout
     assert "--- Package Sizes ---" not in plain_stdout
     for section in (
         "--- Binaries in .venv/bin ---",
@@ -205,7 +226,7 @@ def test_real_uv_rich_comparison_and_json_ignore_contract(tmp_path):
     comparison_plain = click.unstyle(comparison.stdout)
     assert comparison_plain.startswith("--- Rich Comparison Summary ---\n")
     assert "Input kind: fresh-install" in comparison_plain
-    assert "--- Top Changes (Showing 0 of 0) ---" in comparison_plain
+    assert "--- Largest Distribution Changes (Showing 0 of 0) ---" in comparison_plain
     assert "No distribution changes." in comparison_plain
     assert standard_comparison_json.returncode == rich_comparison_json.returncode == 0
     assert standard_comparison_json.stdout == rich_comparison_json.stdout
@@ -234,9 +255,10 @@ def test_real_uv_install_from_local_wheels_renders_global_breakdown(tmp_path):
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
 
-    default = _run_cli(tmp_path, wheelhouse)
-    completed = _run_cli(tmp_path, wheelhouse, "--breakdown")
-    with_scripts = _run_cli(tmp_path, wheelhouse, "--breakdown", "--bin")
+    legacy = ("--report", "standard", "--color", "never")
+    default = _run_cli(tmp_path, wheelhouse, *legacy)
+    completed = _run_cli(tmp_path, wheelhouse, "--breakdown", *legacy)
+    with_scripts = _run_cli(tmp_path, wheelhouse, "--breakdown", "--bin", *legacy)
     raw_result = json.loads(_run_cli(tmp_path, wheelhouse, "--json").stdout)
 
     category_totals = {
@@ -300,9 +322,15 @@ def test_real_uv_install_from_local_wheels_renders_non_split_contributions(tmp_p
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
 
-    completed = _run_cli(tmp_path, wheelhouse, "--contributions")
+    legacy = ("--report", "standard", "--color", "never")
+    completed = _run_cli(tmp_path, wheelhouse, "--contributions", *legacy)
     combined = _run_cli(
-        tmp_path, wheelhouse, "--explain", "--breakdown", "--contributions"
+        tmp_path,
+        wheelhouse,
+        "--explain",
+        "--breakdown",
+        "--contributions",
+        *legacy,
     )
     raw_result = json.loads(_run_cli(tmp_path, wheelhouse, "--json").stdout)
     totals = {
@@ -355,12 +383,14 @@ def test_real_uv_contributions_preserve_duplicate_root_indices_without_bytes(
     wheelhouse = tmp_path / "wheelhouse"
     build_wheelhouse(wheelhouse)
 
-    unique = _run_cli(tmp_path, wheelhouse, "--contributions")
+    legacy = ("--report", "standard", "--color", "never")
+    unique = _run_cli(tmp_path, wheelhouse, "--contributions", *legacy)
     unique_json = _run_cli(tmp_path, wheelhouse, "--json")
     duplicate = _run_cli(
         tmp_path,
         wheelhouse,
         "--contributions",
+        *legacy,
         requirements=(_REQUIREMENTS[0], _REQUIREMENTS[1], _REQUIREMENTS[0]),
     )
     duplicate_json = _run_cli(
@@ -473,7 +503,16 @@ def test_real_uv_local_wheel_baseline_compare_is_read_only_and_stdout_only(tmp_p
     baseline.write_text(recorded.stdout)
     before = baseline.read_bytes()
 
-    completed = _run_cli(tmp_path, wheelhouse, "--baseline", str(baseline))
+    completed = _run_cli(
+        tmp_path,
+        wheelhouse,
+        "--baseline",
+        str(baseline),
+        "--report",
+        "standard",
+        "--color",
+        "never",
+    )
 
     assert completed.returncode == 0
     assert completed.stdout.startswith("--- Size Comparison ---\n")
@@ -749,9 +788,26 @@ def test_existing_prefix_local_wheels_bin_and_json_options_preserve_contract(tmp
     case_rule = json.loads(fresh.stdout)["context"]["case_rule"]
     prefix, site_packages_relative = _install_persistent_prefix(tmp_path, wheelhouse)
 
-    default = _run_prefix_cli(tmp_path, prefix, site_packages_relative, case_rule)
+    default = _run_prefix_cli(
+        tmp_path,
+        prefix,
+        site_packages_relative,
+        case_rule,
+        "--report",
+        "standard",
+        "--color",
+        "never",
+    )
     with_scripts = _run_prefix_cli(
-        tmp_path, prefix, site_packages_relative, case_rule, "--bin"
+        tmp_path,
+        prefix,
+        site_packages_relative,
+        case_rule,
+        "--bin",
+        "--report",
+        "standard",
+        "--color",
+        "never",
     )
     assert default.returncode == with_scripts.returncode == 0
     assert "Binaries in prefix" not in default.stdout

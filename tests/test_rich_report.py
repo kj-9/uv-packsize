@@ -96,7 +96,7 @@ def test_analysis_projection_is_redacted_canonical_and_renders_exact_ascii_summa
         "Distributions: 3\n"
         "Canonical global size: 16 B\n"
         "Distribution-owned aggregate: 16 B\n\n"
-        "--- Top Distributions (Showing 3 of 3) ---\n"
+        "--- Largest Distributions (Showing 3 of 3) ---\n"
         "Distribution  Owned size\n"
         "------------  ----------\n"
         "alpha               10 B\n"
@@ -185,7 +185,8 @@ def test_analysis_projection_limits_top_rows_to_five_with_total_count():
         "epsilon",
         "zeta",
     ]
-    assert "Top Distributions (Showing 5 of 6)" in report
+    assert "Largest Distributions (Showing 5 of 6)" in report
+    assert "Rank" not in report
     assert "alpha" not in report
 
 
@@ -226,7 +227,7 @@ def test_comparison_projection_has_top_changes_without_versions_or_lock_identity
     assert view.lock_changed is None
     assert view.distribution_change_count == 3
     assert [item.name for item in view.top_changes] == ["alpha", "new", "zeta"]
-    assert "Top Changes (Showing 3 of 3)" in report
+    assert "Largest Distribution Changes (Showing 3 of 3)" in report
     assert "Canonical global change: +14 B" in report
     assert "Distribution-owned aggregate change: +14 B" in report
     assert "Lock changed:" not in report

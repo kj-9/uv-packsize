@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: Node 24 Actions update（`done`） |
+| 現在のPhase | Follow-up: 0.2.0 text defaults migration（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -905,6 +905,37 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: 0.2.0 rich/auto text defaults migration
+
+状態: `done`
+
+変更:
+
+- human-readable outputの表示defaultを`--report rich --color auto`へ変更した。redirect/non-TTY、`TERM=dumb`、`NO_COLOR`設定時のdefaultはplain richであり、eligibleなstdout TTYだけを自動装飾する。
+- pre-0.2.0のfull plain textは`--report standard --color never`を明示すれば維持できる。standard distribution tableのsize降順・normalized name tie-breakによる全件orderingは変更せず、richには数字のrank列を追加していない。
+- rich analysis headingを`Largest Distributions (Showing N of M)`、comparison headingを`Largest Distribution Changes (Showing N of M)`へ統一した。largest rowsはowned bytesまたはabsolute deltaの降順とdeterministic name tie-breakでtop 5を維持する。
+- analysis/comparison JSONはnew text defaultsを完全に無視し、stdout/stderr bytes、channel、exit behaviorを変更せず、TTY検査も行わない。progress、sanitized errors、stderr diagnosticsもplainを維持した。
+- README生成help、report/color説明、0.2.0 migration note、MkDocsのpackage/locked-project/measurement contract、roadmapの0.2.0 migration note、rich fixtureを同期した。real local-wheel E2Eでoptionなしredirectがplain richになり、明示standard/neverがlegacy full plainになることを検証した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-defaults-cache uv run --locked pytest tests/test_rich_report.py tests/test_uv_packsize.py tests/test_project_lock_cli.py tests/test_local_wheel_integration.py tests/test_project_lock_e2e.py tests/test_pages_docs.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-defaults-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-defaults-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-defaults-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは246 passed、全体は1013 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict buildも成功した。
+- default rich/auto、auto無効化条件、TTY ANSI、legacy escape、largest heading/top 5/no rank、JSON完全不変をunit/CLI/E2Eで回帰固定した。
+
+次のタスク:
+
+- なし。外部F-007 blockerだけが残る。
 
 ### 2026-08-12: F-011 Node 24 Actions major update
 

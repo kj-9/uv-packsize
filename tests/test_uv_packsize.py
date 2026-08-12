@@ -399,7 +399,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
     max_total=None,
     max_increase=None,
     incomplete_policy=None,
-    report_format=None,
+    report_format="standard",
     quiet=False,
     color_mode=None,
 ):
@@ -1763,10 +1763,12 @@ def test_cli_rich_report_replaces_primary_and_keeps_only_binary_section(
 
     assert report.exit_code == 0
     assert "--- Rich Analysis Summary ---" in report.stdout
-    assert "--- Top Distributions (Showing 1 of 1) ---" in report.stdout
+    assert "--- Largest Distributions (Showing 1 of 1) ---" in report.stdout
     assert "--- Package Sizes ---" not in report.stdout
     assert "--- Binaries in .venv/bin ---" in report.stdout
-    assert report.stdout.index("Top Distributions") < report.stdout.index("Binaries")
+    assert report.stdout.index("Largest Distributions") < report.stdout.index(
+        "Binaries"
+    )
 
 
 def test_cli_json_ignores_rich_report_without_projecting_or_building_graph(
@@ -2130,6 +2132,111 @@ def test_cli_color_always_decorates_only_final_human_report(
         assert "\x1b[" not in line
 
 
+@pytest.mark.parametrize(
+    ("stdout_is_tty", "term", "no_color"),
+    [
+        (False, "xterm-256color", None),
+        (True, "dumb", None),
+        (True, "xterm-256color", ""),
+    ],
+)
+def test_cli_new_text_defaults_are_plain_rich_when_auto_is_disabled(  # noqa: PLR0913
+    monkeypatch, installed_venv, stdout_is_tty, term, no_color
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr("uv_packsize.cli._stdout_is_tty", lambda: stdout_is_tty)
+    monkeypatch.setenv("TERM", term)
+    if no_color is None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    else:
+        monkeypatch.setenv("NO_COLOR", no_color)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format=None,
+        color_mode=None,
+    )
+
+    assert result.exit_code == 0
+    assert "--- Rich Analysis Summary ---" in result.stdout
+    assert "--- Largest Distributions (Showing 1 of 1) ---" in result.stdout
+    assert "--- Package Sizes ---" not in result.stdout
+    assert "\x1b[" not in result.output
+
+
+def test_cli_new_text_defaults_color_rich_report_on_eligible_tty(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr("uv_packsize.cli._stdout_is_tty", lambda: True)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format=None,
+        color_mode=None,
+    )
+
+    assert result.exit_code == 0
+    assert "\x1b[" in result.stdout
+    assert "--- Rich Analysis Summary ---" in click.unstyle(result.stdout)
+    assert "\x1b[" not in result.stderr
+
+
+def test_cli_new_text_defaults_use_largest_rich_comparison(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    recorded = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    baseline.write_text(recorded.stdout)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        report_format=None,
+        color_mode=None,
+    )
+
+    assert result.exit_code == 0
+    assert "--- Rich Comparison Summary ---" in result.stdout
+    assert "--- Largest Distribution Changes (Showing 0 of 0) ---" in result.stdout
+    assert "--- Size Comparison ---" not in result.stdout
+
+
+def test_cli_explicit_standard_never_preserves_the_full_plain_escape(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr("uv_packsize.cli._stdout_is_tty", lambda: True)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        report_format="standard",
+        color_mode="never",
+    )
+
+    assert result.exit_code == 0
+    assert "--- Package Sizes ---" in result.stdout
+    assert "--- Rich Analysis Summary ---" not in result.stdout
+    assert "\x1b[" not in result.output
+
+
 def test_cli_color_never_is_byte_exact_with_the_default(monkeypatch, installed_venv):
     venv_path, _python, site_packages = installed_venv
     _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
@@ -2225,6 +2332,38 @@ def test_cli_json_ignores_every_color_mode(monkeypatch, installed_venv, color_mo
     assert selected.stdout == default.stdout
     assert selected.stderr == default.stderr
     assert "\x1b[" not in selected.output
+
+
+def test_cli_json_ignores_new_text_defaults_without_tty_inspection(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    defaults = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        report_format=None,
+        color_mode=None,
+    )
+    legacy_flags = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        report_format="standard",
+        color_mode="never",
+    )
+
+    assert defaults.exit_code == legacy_flags.exit_code == 0
+    assert defaults.stdout == legacy_flags.stdout
+    assert defaults.stderr == legacy_flags.stderr
 
 
 def test_cli_color_always_keeps_operational_errors_plain(monkeypatch):
@@ -2817,7 +2956,7 @@ def test_cli_help_describes_json_and_bin_interaction():
     assert "--report [standard|rich]" in result.output
     assert (
         "Rich shows a redacted primary top-five summary; ignored with --json or "
-        "--comparison-json. [default: standard]" in normalized_help
+        "--comparison-json. [default: rich]" in normalized_help
     )
     assert "--bin" in result.output
     assert "Text output only:" in result.output
@@ -3325,12 +3464,12 @@ def test_package_name_is_required():
     assert "Missing argument 'PACKAGE_NAMES...'" in result.output
 
 
-def test_cli_color_option_is_public_and_defaults_to_never():
+def test_cli_color_option_is_public_and_defaults_to_auto():
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0
     assert "--color [auto|always|never]" in result.output
-    assert "[default: never]" in result.output
+    assert "[default: auto]" in result.output
 
 
 def test_cli_quiet_keeps_click_usage_errors():
@@ -3542,7 +3681,16 @@ def test_cli_prefix_bin_uses_generic_binary_title(installed_venv):
     _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
 
     result = CliRunner().invoke(
-        cli, _prefix_arguments(venv_path, site_packages, "--bin")
+        cli,
+        _prefix_arguments(
+            venv_path,
+            site_packages,
+            "--bin",
+            "--report",
+            "standard",
+            "--color",
+            "never",
+        ),
     )
 
     assert result.exit_code == 0

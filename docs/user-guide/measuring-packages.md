@@ -25,13 +25,13 @@ uvx uv-packsize 'package-a' 'package-b' --contributions
 
 These options affect only the text presentation and do not change a JSON result.
 
-## Use the compact summary
+## Use the report layouts
 
-The default `--report standard` layout keeps the complete distribution table.
-Use the opt-in rich layout for a compact, redacted overview:
+The default `--report rich` layout provides a compact, redacted overview. To
+request the pre-0.2.0 full plain-text table, use:
 
 ```bash
-uvx uv-packsize requests --report rich
+uvx uv-packsize requests --report standard --color never
 ```
 
 ```text
@@ -44,7 +44,7 @@ Distributions: 1
 Canonical global size: 1.50 KiB
 Distribution-owned aggregate: 1.50 KiB
 
---- Top Distributions (Showing 1 of 1) ---
+--- Largest Distributions (Showing 1 of 1) ---
 Distribution  Owned size
 ------------  ----------
 sample          1.50 KiB
@@ -52,7 +52,9 @@ sample          1.50 KiB
 
 This example is generated from a fixed test result; actual names and sizes
 depend on the resolved environment. Rich analysis reports show at most five
-distributions and state `Showing 5 of N` when more were measured. The rich
+distributions and state `Showing 5 of N` when more were measured. They are
+ordered by owned bytes descending with normalized-name ties and have no rank
+number column. The rich
 primary summary omits raw requirements, installed paths, resolved versions,
 context fingerprints, and lock identities.
 
@@ -83,21 +85,25 @@ with and without `--quiet`; only routine stderr progress is removed.
 
 ## Add terminal color
 
-Color is disabled by default so existing text output remains byte-identical.
-Choose automatic detection or explicitly force ANSI color:
+Color defaults to automatic terminal detection. Force or disable ANSI
+explicitly when needed:
 
 ```bash
-uvx uv-packsize requests --color auto
 uvx uv-packsize requests --report rich --color always
+uvx uv-packsize requests --report standard --color never
 ```
 
 `auto` colors the final stdout report only when stdout is a TTY, `TERM` is not
 `dumb`, and the `NO_COLOR` environment variable is absent. `always` overrides
-TTY, `TERM`, and `NO_COLOR`; `never` is the displayed default. Only fixed report
+TTY, `TERM`, and `NO_COLOR`; `auto` is the displayed default. Only fixed report
 structure is decorated after terminal-safe rendering, so removing ANSI yields
 the same semantic text. Progress, completion messages, errors, usage output,
 and JSON-mode budget diagnostics remain plain. Both JSON modes ignore all
 color values without changing bytes or channels.
+
+In 0.2.0, the human-readable defaults changed from standard/never to
+rich/auto. Scripts that parse text should pin `--report standard --color never`
+or, preferably, consume the versioned JSON output.
 
 ## Save JSON
 

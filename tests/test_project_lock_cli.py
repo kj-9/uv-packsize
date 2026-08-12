@@ -129,7 +129,8 @@ def test_project_lock_text_report_keeps_progress_on_stderr(monkeypatch):
     result = CliRunner().invoke(cli, _arguments())
 
     assert result.exit_code == 0
-    assert "--- Package Sizes ---" in result.stdout
+    assert "--- Rich Analysis Summary ---" in result.stdout
+    assert "--- Package Sizes ---" not in result.stdout
     assert result.stderr == (
         "Calculating size for the selected project lock...\n"
         "Installing the selected project lock...\n"
@@ -329,15 +330,17 @@ def test_project_lock_comparison_json_ignores_every_color_mode(
     assert "\x1b[" not in selected.output
 
 
-def test_project_lock_color_never_is_byte_exact_with_default(monkeypatch):
+def test_project_lock_explicit_standard_never_is_the_legacy_plain_escape(monkeypatch):
     _project_double(monkeypatch)
 
-    default = CliRunner().invoke(cli, _arguments())
-    never = CliRunner().invoke(cli, _arguments("--color", "never"))
+    standard = CliRunner().invoke(
+        cli, _arguments("--report", "standard", "--color", "never")
+    )
 
-    assert never.exit_code == default.exit_code == 0
-    assert never.stdout == default.stdout
-    assert never.stderr == default.stderr
+    assert standard.exit_code == 0
+    assert "--- Package Sizes ---" in standard.stdout
+    assert "--- Rich Analysis Summary ---" not in standard.stdout
+    assert "\x1b[" not in standard.output
 
 
 @pytest.mark.parametrize(

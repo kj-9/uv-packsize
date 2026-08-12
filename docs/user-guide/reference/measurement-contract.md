@@ -44,7 +44,7 @@ byte-identical with and without `--quiet`; failures retain their existing
 stdout-empty rules.
 
 `--color [auto|always|never]` affects only a human-readable final stdout report
-and defaults to `never`. `never` preserves the established bytes exactly.
+and defaults to `auto`. `never` disables ANSI.
 `auto` enables ANSI only for a stdout TTY when `TERM != dumb` and `NO_COLOR` is
 unset; `always` deliberately ignores those conditions. Decoration is applied
 after terminal-safe rendering and does not change semantic text. Progress,
@@ -52,8 +52,7 @@ completion messages, sanitized errors, Click usage, and JSON-mode budget
 failure diagnostics are always plain. Analysis and comparison JSON accept but
 ignore every color value, preserving bytes, channels, and exit behavior.
 
-For human-readable output, `--report standard` is the default and preserves the
-full legacy text layout. `--report rich` is an opt-in, terminal-safe summary
+For human-readable output, `--report rich` is the default terminal-safe summary
 limited to five distribution rows. Its primary summary exposes aggregate
 measurement facts but not raw requirements, installed paths, resolved versions,
 lock identities, or context fingerprints. This redaction does not cover
@@ -61,6 +60,12 @@ appended legacy sections: `--bin` can display script paths, and `--explain` can
 display installed metadata including resolved versions and dependency
 information. Both JSON modes accept and ignore `--report`, leaving their schema
 and bytes unchanged.
+
+The 0.2.0 text defaults are rich/auto. `--report standard --color never`
+preserves the pre-0.2.0 full plain-text output escape. Standard rows keep their
+full size-descending/name-tie order. Rich uses `Largest Distributions (Showing
+N of M)` and comparisons use `Largest Distribution Changes (Showing N of M)`;
+neither adds a numeric rank column.
 
 | Status | Meaning |
 | --- | --- |

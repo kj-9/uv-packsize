@@ -452,7 +452,7 @@ def _explanation_failure_message(error: Exception) -> str:
     "--report",
     "report_format",
     type=click.Choice(["standard", "rich"]),
-    default="standard",
+    default="rich",
     show_default=True,
     help=(
         "Text report layout. Rich shows a redacted primary top-five summary; "
@@ -468,7 +468,7 @@ def _explanation_failure_message(error: Exception) -> str:
     "--color",
     "color_mode",
     type=click.Choice([mode.value for mode in ColorMode]),
-    default=ColorMode.NEVER.value,
+    default=ColorMode.AUTO.value,
     show_default=True,
     help="Color human-readable final reports; JSON and diagnostics remain plain.",
 )

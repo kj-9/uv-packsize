@@ -102,7 +102,7 @@ def test_real_uv_sync_project_lock_rich_analysis_and_comparison(tmp_path):
     assert analysis.stdout.startswith("--- Rich Analysis Summary ---\n")
     assert "Input kind: project-lock" in analysis.stdout
     assert "Build policy: wheel-only" in analysis.stdout
-    assert "--- Top Distributions (Showing 3 of 3) ---" in analysis.stdout
+    assert "--- Largest Distributions (Showing 3 of 3) ---" in analysis.stdout
     assert "1.0.0" not in analysis.stdout
     assert comparison.stdout.startswith("--- Rich Comparison Summary ---\n")
     assert "Input kind: project-lock" in comparison.stdout

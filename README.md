@@ -81,11 +81,11 @@ Options:
                                   as JSON to stdout.
   --report [standard|rich]        Text report layout. Rich shows a redacted
                                   primary top-five summary; ignored with --json
-                                  or --comparison-json.  [default: standard]
+                                  or --comparison-json.  [default: rich]
   --quiet                         Suppress progress messages without changing
                                   final output or errors.
   --color [auto|always|never]     Color human-readable final reports; JSON and
-                                  diagnostics remain plain.  [default: never]
+                                  diagnostics remain plain.  [default: auto]
   --budget-config PATH            Read budget policy from [tool.uv-
                                   packsize.budget] in PATH.
   --max-total BYTES               Maximum canonical global logical size in
@@ -117,11 +117,12 @@ python -m uv_packsize --help
 
 ### Report layouts
 
-The default `--report standard` layout preserves the full distribution table
-and the existing text-output contract. Opt in to a compact, redacted summary:
+The default `--report rich` layout is a compact, redacted summary. To retain
+the pre-0.2.0 full plain-text table exactly, select both legacy presentation
+options explicitly:
 
 ```bash
-uvx uv-packsize requests --report rich
+uvx uv-packsize requests --report standard --color never
 ```
 
 The rich primary summary shows the input kind, build policy, completeness,
@@ -129,7 +130,9 @@ warning count, canonical global size, distribution-owned aggregate, and the
 five largest distributions by owned logical bytes. That primary summary does
 not show raw requirements, installed paths, resolved versions, context
 fingerprints, or lock identities. If more than five distributions were
-measured, its heading states `Showing 5 of N`.
+measured, its `Largest Distributions` heading states `Showing 5 of N`. Rows
+remain ordered by owned size descending, then normalized name; no numeric rank
+column is added.
 
 With a baseline, rich mode shows the corresponding redacted comparison summary
 and the five largest non-zero distribution changes. `--bin`, `--explain`,
@@ -160,19 +163,19 @@ without routine status messages.
 
 ### Terminal color
 
-Color is opt-in and defaults to `--color never`, preserving the existing text
-bytes exactly. Use automatic terminal detection or force ANSI color explicitly:
+Color defaults to `--color auto`. Automatic detection keeps redirected and
+other non-TTY output plain; force or disable ANSI explicitly when needed:
 
 ```bash
-uvx uv-packsize requests --color auto
 uvx uv-packsize requests --report rich --color always
+uvx uv-packsize requests --report standard --color never
 ```
 
 `auto` decorates a human-readable final stdout report only when stdout is a
 TTY, `TERM` is not `dumb`, and `NO_COLOR` is not present in the environment.
 `always` ignores all three conditions, including `NO_COLOR`, which is useful
-when the receiving program explicitly supports ANSI. `never` and the default
-produce the exact existing report bytes.
+when the receiving program explicitly supports ANSI. `never` disables ANSI;
+combined with `--report standard`, it is the exact pre-0.2.0 full-text escape.
 
 Color changes presentation only: removing ANSI sequences yields the same
 standard or rich report text. Primary reports, appended graph and binary
@@ -181,6 +184,10 @@ completion messages, sanitized errors, Click usage, and JSON-mode budget
 failure diagnostics remain plain. `--json` and `--comparison-json` accept and
 completely ignore every `--color` value, preserving their stdout bytes and
 channels.
+
+This is a 0.2.0 human-text migration: the defaults changed from
+standard/never to rich/auto. Scripts should pin the legacy escape above or,
+preferably, consume versioned JSON.
 
 ### Locked project analysis
 

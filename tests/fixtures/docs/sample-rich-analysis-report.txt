@@ -7,7 +7,7 @@ Distributions: 1
 Canonical global size: 1.50 KiB
 Distribution-owned aggregate: 1.50 KiB
 
---- Top Distributions (Showing 1 of 1) ---
+--- Largest Distributions (Showing 1 of 1) ---
 Distribution  Owned size
 ------------  ----------
 sample          1.50 KiB
