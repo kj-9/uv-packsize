@@ -384,6 +384,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
     incomplete_policy=None,
     report_format=None,
     quiet=False,
+    color_mode=None,
 ):
     venv_path, python, _site_packages = installed_venv
     monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
@@ -452,6 +453,8 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
         arguments.extend(("--report", report_format))
     if quiet:
         arguments.append("--quiet")
+    if color_mode is not None:
+        arguments.extend(("--color", color_mode))
     return CliRunner().invoke(cli, arguments)
 
 
@@ -1983,6 +1986,294 @@ def test_cli_quiet_operational_failure_keeps_error_and_empty_stdout(
     assert "private failure" not in result.stderr
 
 
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_color_always_decorates_only_final_human_report(
+    monkeypatch, installed_venv, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    plain = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+        contributions=True,
+        max_total=10_000,
+        report_format=report_format,
+    )
+    colored = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        explain=True,
+        breakdown=True,
+        contributions=True,
+        max_total=10_000,
+        report_format=report_format,
+        color_mode="always",
+    )
+
+    assert colored.exit_code == plain.exit_code == 0
+    assert click.unstyle(colored.stdout) == plain.stdout
+    assert colored.stderr == plain.stderr
+    assert "\x1b[" in colored.stdout
+    assert "Result: \x1b[32mPASS\x1b[0m" in colored.stdout
+    for progress in (
+        "Calculating size",
+        "Creating virtual environment",
+        "Installing 1 requested package",
+        "Analyzing sizes",
+        "Explaining dependencies",
+        "Calculation complete",
+    ):
+        line = next(line for line in colored.output.splitlines() if progress in line)
+        assert "\x1b[" not in line
+
+
+def test_cli_color_never_is_byte_exact_with_the_default(monkeypatch, installed_venv):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    default = _run_local_layout(monkeypatch, installed_venv, ["sample==1.0"])
+    never = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        color_mode="never",
+    )
+
+    assert never.exit_code == default.exit_code == 0
+    assert never.stdout == default.stdout
+    assert never.stderr == default.stderr
+
+
+@pytest.mark.parametrize(
+    ("stdout_is_tty", "term", "no_color", "has_color"),
+    [
+        (True, "xterm-256color", None, True),
+        (False, "xterm-256color", None, False),
+        (True, "dumb", None, False),
+        (True, "xterm-256color", "", False),
+    ],
+)
+def test_cli_color_auto_uses_only_stdout_tty_term_and_no_color(  # noqa: PLR0913
+    monkeypatch, installed_venv, stdout_is_tty, term, no_color, has_color
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr("uv_packsize.cli._stdout_is_tty", lambda: stdout_is_tty)
+    monkeypatch.setenv("TERM", term)
+    if no_color is None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    else:
+        monkeypatch.setenv("NO_COLOR", no_color)
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        color_mode="auto",
+    )
+
+    assert result.exit_code == 0
+    assert ("\x1b[" in result.stdout) is has_color
+
+
+def test_cli_color_always_ignores_non_tty_term_and_no_color(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr("uv_packsize.cli._stdout_is_tty", lambda: False)
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        color_mode="always",
+    )
+
+    assert result.exit_code == 0
+    assert "\x1b[" in result.stdout
+
+
+@pytest.mark.parametrize("color_mode", ["auto", "always", "never"])
+def test_cli_json_ignores_every_color_mode(monkeypatch, installed_venv, color_mode):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    selected = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        color_mode=color_mode,
+    )
+
+    assert selected.exit_code == default.exit_code == 0
+    assert selected.stdout == default.stdout
+    assert selected.stderr == default.stderr
+    assert "\x1b[" not in selected.output
+
+
+def test_cli_color_always_keeps_operational_errors_plain(monkeypatch):
+    monkeypatch.setattr("uv_packsize.cli.shutil.which", lambda _command: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "uv_packsize.cli._create_venv",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            UvCommandError(("uv", "venv"), 7, "", "private failure")
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["--color", "always", "sample==1.0"])
+
+    assert result.exit_code == 1
+    assert "Could not create the virtual environment" in result.stderr
+    assert "\x1b[" not in result.output
+
+
+def test_cli_invalid_color_usage_is_plain():
+    result = CliRunner().invoke(cli, ["--color", "sometimes", "sample"])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--color'" in result.stderr
+    assert "\x1b[" not in result.output
+
+
+def test_cli_color_always_decorates_comparison_and_keeps_progress_plain(
+    monkeypatch, installed_venv, tmp_path
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    baseline.write_text(initial.stdout)
+
+    plain = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], baseline=baseline
+    )
+    colored = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        report_format="rich",
+        color_mode="always",
+    )
+    rich_plain = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        report_format="rich",
+    )
+
+    assert plain.exit_code == colored.exit_code == rich_plain.exit_code == 0
+    assert click.unstyle(colored.stdout) == rich_plain.stdout
+    assert colored.stderr == rich_plain.stderr
+    assert "\x1b[" in colored.stdout
+    assert "\x1b[" not in colored.stderr
+
+
+@pytest.mark.parametrize("color_mode", ["auto", "always", "never"])
+def test_cli_comparison_json_ignores_every_color_mode(
+    monkeypatch, installed_venv, tmp_path, color_mode
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    baseline = tmp_path / "baseline.json"
+    initial = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    baseline.write_text(initial.stdout)
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    default = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+    )
+    selected = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        baseline=baseline,
+        comparison_json=True,
+        color_mode=color_mode,
+    )
+
+    assert selected.exit_code == default.exit_code == 0
+    assert selected.stdout == default.stdout
+    assert selected.stderr == default.stderr
+    assert "\x1b[" not in selected.output
+
+
+def test_cli_color_budget_failure_decorates_report_but_not_error(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        max_total=0,
+        color_mode="always",
+    )
+
+    assert result.exit_code == 5
+    assert "Result: \x1b[31mFAIL\x1b[0m" in result.stdout
+    assert "Error: Size budget was exceeded." in result.stderr
+    assert "\x1b[" not in result.stderr
+
+
+def test_cli_json_budget_failure_ignores_color_and_keeps_stderr_plain(
+    monkeypatch, installed_venv
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    result = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        max_total=0,
+        color_mode="always",
+    )
+
+    assert result.exit_code == 5
+    assert result.stdout == ""
+    assert "--- Size Budget ---" in result.stderr
+    assert "Error: Size budget was exceeded." in result.stderr
+    assert "\x1b[" not in result.stderr
+
+
 def test_cli_json_writes_only_the_stable_serializer_to_stdout(
     monkeypatch, installed_venv
 ):
@@ -2936,6 +3227,14 @@ def test_package_name_is_required():
     assert "Missing argument 'PACKAGE_NAMES...'" in result.output
 
 
+def test_cli_color_option_is_public_and_defaults_to_never():
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--color [auto|always|never]" in result.output
+    assert "[default: never]" in result.output
+
+
 def test_cli_quiet_keeps_click_usage_errors():
     result = CliRunner().invoke(cli, ["--quiet"])
 
@@ -3058,6 +3357,61 @@ def test_cli_prefix_quiet_json_preserves_stdout_bytes(installed_venv):
     assert quiet.exit_code == default.exit_code == 0
     assert quiet.stdout == default.stdout
     assert quiet.stderr == ""
+
+
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_cli_prefix_color_always_decorates_only_final_report(
+    installed_venv, report_format
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+
+    plain = CliRunner().invoke(
+        cli,
+        _prefix_arguments(venv_path, site_packages, "--report", report_format),
+    )
+    colored = CliRunner().invoke(
+        cli,
+        _prefix_arguments(
+            venv_path,
+            site_packages,
+            "--report",
+            report_format,
+            "--color",
+            "always",
+        ),
+    )
+
+    assert colored.exit_code == plain.exit_code == 0
+    assert click.unstyle(colored.stdout) == plain.stdout
+    assert colored.stderr == plain.stderr
+    assert "\x1b[" in colored.stdout
+    assert "Analyzing existing prefix...\n\x1b[" in colored.stdout
+
+
+@pytest.mark.parametrize("color_mode", ["auto", "always", "never"])
+def test_cli_prefix_json_ignores_every_color_mode(
+    monkeypatch, installed_venv, color_mode
+):
+    venv_path, _python, site_packages = installed_venv
+    _add_distribution(venv_path=venv_path, site_packages=site_packages, name="sample")
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    default = CliRunner().invoke(
+        cli, _prefix_arguments(venv_path, site_packages, "--json")
+    )
+    selected = CliRunner().invoke(
+        cli,
+        _prefix_arguments(venv_path, site_packages, "--json", "--color", color_mode),
+    )
+
+    assert selected.exit_code == default.exit_code == 0
+    assert selected.stdout == default.stdout
+    assert selected.stderr == default.stderr
+    assert "\x1b[" not in selected.output
 
 
 def test_cli_prefix_json_ignores_text_presentation_options(installed_venv):

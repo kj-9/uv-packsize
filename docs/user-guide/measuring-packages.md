@@ -81,6 +81,24 @@ Click usage errors. Baseline comparison and writing keep their final output and
 file behavior. For `--json` and `--comparison-json`, stdout is byte-identical
 with and without `--quiet`; only routine stderr progress is removed.
 
+## Add terminal color
+
+Color is disabled by default so existing text output remains byte-identical.
+Choose automatic detection or explicitly force ANSI color:
+
+```bash
+uvx uv-packsize requests --color auto
+uvx uv-packsize requests --report rich --color always
+```
+
+`auto` colors the final stdout report only when stdout is a TTY, `TERM` is not
+`dumb`, and the `NO_COLOR` environment variable is absent. `always` overrides
+TTY, `TERM`, and `NO_COLOR`; `never` is the displayed default. Only fixed report
+structure is decorated after terminal-safe rendering, so removing ANSI yields
+the same semantic text. Progress, completion messages, errors, usage output,
+and JSON-mode budget diagnostics remain plain. Both JSON modes ignore all
+color values without changing bytes or channels.
+
 ## Save JSON
 
 ```bash

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -256,6 +257,87 @@ def test_project_lock_quiet_json_and_comparison_preserve_stdout_bytes(
     assert quiet_comparison.exit_code == default_comparison.exit_code == 0
     assert quiet_comparison.stdout == default_comparison.stdout
     assert quiet_comparison.stderr == ""
+
+
+@pytest.mark.parametrize("report_format", ["standard", "rich"])
+def test_project_lock_color_always_decorates_only_final_report(
+    monkeypatch, report_format
+):
+    _project_double(monkeypatch)
+
+    plain = CliRunner().invoke(cli, _arguments("--report", report_format))
+    colored = CliRunner().invoke(
+        cli, _arguments("--report", report_format, "--color", "always")
+    )
+
+    assert colored.exit_code == plain.exit_code == 0
+    assert click.unstyle(colored.stdout) == plain.stdout
+    assert colored.stderr == plain.stderr
+    assert "\x1b[" in colored.stdout
+    assert "\x1b[" not in colored.stderr
+
+
+@pytest.mark.parametrize("color_mode", ["auto", "always", "never"])
+def test_project_lock_json_ignores_every_color_mode(monkeypatch, color_mode):
+    _project_double(monkeypatch)
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    default = CliRunner().invoke(cli, _arguments("--json"))
+    selected = CliRunner().invoke(cli, _arguments("--json", "--color", color_mode))
+
+    assert selected.exit_code == default.exit_code == 0
+    assert selected.stdout == default.stdout
+    assert selected.stderr == default.stderr
+    assert "\x1b[" not in selected.output
+
+
+@pytest.mark.parametrize("color_mode", ["auto", "always", "never"])
+def test_project_lock_comparison_json_ignores_every_color_mode(
+    monkeypatch, tmp_path, color_mode
+):
+    _project_double(monkeypatch)
+    baseline = tmp_path / "project-baseline.json"
+    recorded = CliRunner().invoke(
+        cli, _arguments("--json", "--write-baseline", str(baseline))
+    )
+    assert recorded.exit_code == 0
+    monkeypatch.setattr(
+        "uv_packsize.cli._stdout_is_tty",
+        lambda: (_ for _ in ()).throw(AssertionError("JSON must not inspect TTY")),
+    )
+
+    default = CliRunner().invoke(
+        cli, _arguments("--baseline", str(baseline), "--comparison-json")
+    )
+    selected = CliRunner().invoke(
+        cli,
+        _arguments(
+            "--baseline",
+            str(baseline),
+            "--comparison-json",
+            "--color",
+            color_mode,
+        ),
+    )
+
+    assert selected.exit_code == default.exit_code == 0
+    assert selected.stdout == default.stdout
+    assert selected.stderr == default.stderr
+    assert "\x1b[" not in selected.output
+
+
+def test_project_lock_color_never_is_byte_exact_with_default(monkeypatch):
+    _project_double(monkeypatch)
+
+    default = CliRunner().invoke(cli, _arguments())
+    never = CliRunner().invoke(cli, _arguments("--color", "never"))
+
+    assert never.exit_code == default.exit_code == 0
+    assert never.stdout == default.stdout
+    assert never.stderr == default.stderr
 
 
 @pytest.mark.parametrize(

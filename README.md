@@ -84,6 +84,8 @@ Options:
                                   or --comparison-json.  [default: standard]
   --quiet                         Suppress progress messages without changing
                                   final output or errors.
+  --color [auto|always|never]     Color human-readable final reports; JSON and
+                                  diagnostics remain plain.  [default: never]
   --budget-config PATH            Read budget policy from [tool.uv-
                                   packsize.budget] in PATH.
   --max-total BYTES               Maximum canonical global logical size in
@@ -155,6 +157,30 @@ are not suppressed. In JSON modes, `--quiet` changes only stderr progress;
 successful stdout bytes are identical to the corresponding command without
 `--quiet`. The option is useful for scripts that want diagnostics on failure
 without routine status messages.
+
+### Terminal color
+
+Color is opt-in and defaults to `--color never`, preserving the existing text
+bytes exactly. Use automatic terminal detection or force ANSI color explicitly:
+
+```bash
+uvx uv-packsize requests --color auto
+uvx uv-packsize requests --report rich --color always
+```
+
+`auto` decorates a human-readable final stdout report only when stdout is a
+TTY, `TERM` is not `dumb`, and `NO_COLOR` is not present in the environment.
+`always` ignores all three conditions, including `NO_COLOR`, which is useful
+when the receiving program explicitly supports ANSI. `never` and the default
+produce the exact existing report bytes.
+
+Color changes presentation only: removing ANSI sequences yields the same
+standard or rich report text. Primary reports, appended graph and binary
+sections, comparisons, and text budget sections share this rule. Progress,
+completion messages, sanitized errors, Click usage, and JSON-mode budget
+failure diagnostics remain plain. `--json` and `--comparison-json` accept and
+completely ignore every `--color` value, preserving their stdout bytes and
+channels.
 
 ### Locked project analysis
 

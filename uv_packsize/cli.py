@@ -37,6 +37,7 @@ from uv_packsize.budget_config_source import (
     load_budget_policy,
 )
 from uv_packsize.budget_render import render_budget_report
+from uv_packsize.color_render import ColorMode, decorate_report, should_color_report
 from uv_packsize.comparison_json_render import render_comparison_json
 from uv_packsize.dependency_paths import explain_dependency_paths
 from uv_packsize.diff import IncompatibleComparisonError, compare_baselines
@@ -204,6 +205,27 @@ def _progress(message: str, *, quiet: bool, err: bool = False) -> None:
 
     if not quiet:
         click.echo(message, err=err)
+
+
+def _stdout_is_tty() -> bool:
+    """Return only the stdout stream capability used by automatic color."""
+
+    return bool(click.get_text_stream("stdout").isatty())
+
+
+def _echo_report(report: str, *, color_mode: str) -> None:
+    """Write one human report, decorating only after safe text rendering."""
+
+    enabled = should_color_report(
+        ColorMode(color_mode),
+        stdout_is_tty=_stdout_is_tty(),
+        term=os.environ.get("TERM"),
+        no_color_is_set="NO_COLOR" in os.environ,
+    )
+    if enabled:
+        click.echo(decorate_report(report), color=True)
+    else:
+        click.echo(report)
 
 
 def _create_venv(venv_dir, python=None, *, err=False, quiet=False):
@@ -443,6 +465,14 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Suppress progress messages without changing final output or errors.",
 )
 @click.option(
+    "--color",
+    "color_mode",
+    type=click.Choice([mode.value for mode in ColorMode]),
+    default=ColorMode.NEVER.value,
+    show_default=True,
+    help="Color human-readable final reports; JSON and diagnostics remain plain.",
+)
+@click.option(
     "--budget-config",
     type=click.Path(path_type=Path),
     help="Read budget policy from [tool.uv-packsize.budget] in PATH.",
@@ -513,6 +543,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     comparison_json,
     report_format,
     quiet,
+    color_mode,
     budget_config,
     max_total,
     max_increase,
@@ -608,6 +639,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             json_output=json_output,
             report_format=report_format,
             quiet=quiet,
+            color_mode=color_mode,
         )
         return
 
@@ -630,6 +662,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             bin=bin,
             report_format=report_format,
             quiet=quiet,
+            color_mode=color_mode,
         )
         return
 
@@ -750,7 +783,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                     report = "\n\n".join(
                         (report, render_budget_report(budget_evaluation))
                     )
-                click.echo(report)
+                _echo_report(report, color_mode=color_mode)
                 if budget_evaluation is not None and not budget_evaluation.passed:
                     _raise_budget_violation(budget_evaluation, json_output=False)
             return
@@ -827,12 +860,12 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
             if budget_evaluation is not None and not budget_evaluation.passed:
-                click.echo(report)
+                _echo_report(report, color_mode=color_mode)
                 _raise_budget_violation(budget_evaluation, json_output=False)
             _write_fresh_baseline_if_requested(
                 write_baseline_path, result, overwrite_baseline
             )
-            click.echo(report)
+            _echo_report(report, color_mode=color_mode)
         else:
             report = _render_primary_analysis_report(
                 result,
@@ -842,12 +875,12 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
             if budget_evaluation is not None and not budget_evaluation.passed:
-                click.echo(report)
+                _echo_report(report, color_mode=color_mode)
                 _raise_budget_violation(budget_evaluation, json_output=False)
             _write_fresh_baseline_if_requested(
                 write_baseline_path, result, overwrite_baseline
             )
-            click.echo(report)
+            _echo_report(report, color_mode=color_mode)
 
     _progress(
         "\nCalculation complete.",
@@ -1167,6 +1200,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
     bin: bool,
     report_format: str,
     quiet: bool,
+    color_mode: str,
 ) -> None:
     """Run the project-lock path without reopening validated input bytes."""
 
@@ -1286,7 +1320,7 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
             report = _render_comparison_report(diff, report_format=report_format)
             if budget_evaluation is not None:
                 report = "\n\n".join((report, render_budget_report(budget_evaluation)))
-            click.echo(report)
+            _echo_report(report, color_mode=color_mode)
             if budget_evaluation is not None and not budget_evaluation.passed:
                 _raise_budget_violation(budget_evaluation, json_output=False)
         return
@@ -1308,12 +1342,12 @@ def _run_project_lock_analysis(  # noqa: PLR0912, PLR0913, PLR0915
         if budget_evaluation is not None:
             report = "\n\n".join((report, render_budget_report(budget_evaluation)))
         if budget_evaluation is not None and not budget_evaluation.passed:
-            click.echo(report)
+            _echo_report(report, color_mode=color_mode)
             _raise_budget_violation(budget_evaluation, json_output=False)
         _write_project_lock_baseline_if_requested(
             write_baseline_path, result, overwrite_baseline
         )
-        click.echo(report)
+        _echo_report(report, color_mode=color_mode)
     _progress("\nCalculation complete.", quiet=quiet, err=progress_to_stderr)
 
 
@@ -1378,6 +1412,7 @@ def _run_prefix_analysis(  # noqa: PLR0913
     json_output: bool,
     report_format: str,
     quiet: bool,
+    color_mode: str,
 ) -> None:
     """Analyze an existing prefix without invoking uv or an interpreter."""
 
@@ -1403,12 +1438,13 @@ def _run_prefix_analysis(  # noqa: PLR0913
     if json_output:
         click.echo(render_analysis_json(result, schema_version=2), nl=False)
     else:
-        click.echo(
+        _echo_report(
             _render_primary_analysis_report(
                 result,
                 report_format=report_format,
                 show_scripts=bin,
                 binaries_title="Binaries in prefix",
-            )
+            ),
+            color_mode=color_mode,
         )
     _progress("\nExisting prefix analysis complete.", quiet=quiet, err=json_output)

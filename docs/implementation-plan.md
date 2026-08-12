@@ -8,9 +8,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: CLI text polish（`in_progress`） |
+| 現在のPhase | Follow-up: CLI text polish（`done`） |
 | `in_progress` | なし |
-| 次のタスク | F-010 第4段: TTY colorを設計する |
+| 次のタスク | F-008: baseline read hardening |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,37 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第4段 opt-in TTY color
+
+状態: `done`
+
+変更:
+
+- `--color [auto|always|never]`を公開し、既存text bytesを維持する`never`を表示defaultにした。`auto`はstdout reportがTTY、`TERM != dumb`、`NO_COLOR`未設定の全条件を満たす場合だけ有効になり、`always`はこれらを明示的に無視する。
+- terminal-safeなplain reportの生成後に適用するpure color policy/decoratorを追加した。固定構造のheading、warning、completeness、budget PASS/FAILだけを装飾し、ANSIを除けばsemantic textと改行はplain reportに完全一致する。
+- fresh install、project/lock、existing prefixのstandard/rich primary、追加graph/binary section、analysis/comparison、text budget reportを単一のhuman-report出力境界へ接続した。強制colorはglobal Click contextを変更せず、対象echoだけ`color=True`にする。
+- progress、completion message、sanitized error、Click usage、JSON budget failure stderrは常にplainとした。analysis/comparison JSONは全color値を受理して完全に無視し、stdout/stderr bytes、exit code、TTY検査の有無を既存契約どおり維持する。
+- READMEの生成helpと公開契約、MkDocsのpackage測定guideとmeasurement contractへdefault、auto判定、always override、JSON無視の境界を追加した。real local-wheel E2Eでもrich primary、追加section、budget、comparison、JSON無視を検証した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-color-cache uv run --locked pytest tests/test_color_render.py tests/test_uv_packsize.py tests/test_project_lock_cli.py tests/test_local_wheel_integration.py tests/test_project_lock_e2e.py tests/test_pages_docs.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-color-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-color-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-color-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは239 passed、全体は991 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict buildも成功した。
+- default/明示neverの既存bytes、autoのTTY/TERM/NO_COLOR条件、alwaysの非TTY強制、ANSI除去後のsemantic equivalence、plain diagnostic境界、全JSON modeの完全無視を検証した。
+
+次のタスク:
+
+- F-010 CLI text polishは完了。未完了のF-008 baseline read hardeningへ進む。
 
 ### 2026-08-12: F-010 第3段 `--quiet` progress suppression
 
@@ -2971,5 +3002,5 @@ uv run --locked python scripts/verify_build.py dist
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
-| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。terminal-safe共通display/table primitives、opt-in rich summary、progressだけを抑止する`--quiet`は完了した。次は非TTYと既存ASCII bytesを守るTTY color契約を設計する | リリース後のCLI text polish | `in_progress` |
+| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。terminal-safe共通display/table primitives、opt-in rich summary、progressだけを抑止する`--quiet`、default-offのTTY colorを完了した | リリース後のCLI text polish | `done` |
 | F-011 | GitHub Actionsが`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告を出している。現時点はGitHub側のNode 24強制実行で挙動を変えず、upstreamの正式なNode 24対応majorが出た時点でpinned action majorを更新する | upstream releaseの監視と後続upgrade | `todo` |

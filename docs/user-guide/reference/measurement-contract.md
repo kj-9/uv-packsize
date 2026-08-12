@@ -43,6 +43,15 @@ Click usage errors, and exit statuses remain visible. Successful JSON stdout is
 byte-identical with and without `--quiet`; failures retain their existing
 stdout-empty rules.
 
+`--color [auto|always|never]` affects only a human-readable final stdout report
+and defaults to `never`. `never` preserves the established bytes exactly.
+`auto` enables ANSI only for a stdout TTY when `TERM != dumb` and `NO_COLOR` is
+unset; `always` deliberately ignores those conditions. Decoration is applied
+after terminal-safe rendering and does not change semantic text. Progress,
+completion messages, sanitized errors, Click usage, and JSON-mode budget
+failure diagnostics are always plain. Analysis and comparison JSON accept but
+ignore every color value, preserving bytes, channels, and exit behavior.
+
 For human-readable output, `--report standard` is the default and preserves the
 full legacy text layout. `--report rich` is an opt-in, terminal-safe summary
 limited to five distribution rows. Its primary summary exposes aggregate

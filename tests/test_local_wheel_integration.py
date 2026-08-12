@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 from typing import cast
 
+import click
 import pytest
 from local_wheel_factory import build_wheelhouse
 
@@ -128,6 +129,8 @@ def test_real_uv_rich_report_composes_text_features_budget_and_baseline_write(
         wheelhouse,
         "--report",
         "rich",
+        "--color",
+        "always",
         "--bin",
         "--explain",
         "--breakdown",
@@ -139,12 +142,14 @@ def test_real_uv_rich_report_composes_text_features_budget_and_baseline_write(
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.startswith("--- Rich Analysis Summary ---\n")
-    assert "Input kind: fresh-install" in completed.stdout
-    assert "Build policy: wheel-only" in completed.stdout
-    assert "Completeness: complete" in completed.stdout
-    assert "--- Top Distributions (Showing 3 of 3) ---" in completed.stdout
-    assert "--- Package Sizes ---" not in completed.stdout
+    plain_stdout = click.unstyle(completed.stdout)
+    assert "\x1b[" in completed.stdout
+    assert plain_stdout.startswith("--- Rich Analysis Summary ---\n")
+    assert "Input kind: fresh-install" in plain_stdout
+    assert "Build policy: wheel-only" in plain_stdout
+    assert "Completeness: complete" in plain_stdout
+    assert "--- Top Distributions (Showing 3 of 3) ---" in plain_stdout
+    assert "--- Package Sizes ---" not in plain_stdout
     for section in (
         "--- Binaries in .venv/bin ---",
         "--- Requested Roots ---",
@@ -152,8 +157,8 @@ def test_real_uv_rich_report_composes_text_features_budget_and_baseline_write(
         "--- Root Contributions ---",
         "--- Size Budget ---",
     ):
-        assert section in completed.stdout
-    assert "Result: PASS" in completed.stdout
+        assert section in plain_stdout
+    assert "Result: PASS" in plain_stdout
     assert json.loads(baseline.read_text())["schema_version"] == 1
 
 
@@ -164,9 +169,18 @@ def test_real_uv_rich_comparison_and_json_ignore_contract(tmp_path):
     standard_json = _run_cli(tmp_path, wheelhouse, "--json")
     baseline.write_text(standard_json.stdout)
 
-    rich_json = _run_cli(tmp_path, wheelhouse, "--json", "--report", "rich")
+    rich_json = _run_cli(
+        tmp_path, wheelhouse, "--json", "--report", "rich", "--color", "always"
+    )
     comparison = _run_cli(
-        tmp_path, wheelhouse, "--baseline", str(baseline), "--report", "rich"
+        tmp_path,
+        wheelhouse,
+        "--baseline",
+        str(baseline),
+        "--report",
+        "rich",
+        "--color",
+        "always",
     )
     standard_comparison_json = _run_cli(
         tmp_path, wheelhouse, "--baseline", str(baseline), "--comparison-json"
@@ -179,16 +193,20 @@ def test_real_uv_rich_comparison_and_json_ignore_contract(tmp_path):
         "--comparison-json",
         "--report",
         "rich",
+        "--color",
+        "always",
     )
 
     assert standard_json.returncode == rich_json.returncode == 0
     assert standard_json.stdout == rich_json.stdout
     assert standard_json.stderr == rich_json.stderr
     assert comparison.returncode == 0, comparison.stderr
-    assert comparison.stdout.startswith("--- Rich Comparison Summary ---\n")
-    assert "Input kind: fresh-install" in comparison.stdout
-    assert "--- Top Changes (Showing 0 of 0) ---" in comparison.stdout
-    assert "No distribution changes." in comparison.stdout
+    assert "\x1b[" in comparison.stdout
+    comparison_plain = click.unstyle(comparison.stdout)
+    assert comparison_plain.startswith("--- Rich Comparison Summary ---\n")
+    assert "Input kind: fresh-install" in comparison_plain
+    assert "--- Top Changes (Showing 0 of 0) ---" in comparison_plain
+    assert "No distribution changes." in comparison_plain
     assert standard_comparison_json.returncode == rich_comparison_json.returncode == 0
     assert standard_comparison_json.stdout == rich_comparison_json.stdout
     assert standard_comparison_json.stderr == rich_comparison_json.stderr
