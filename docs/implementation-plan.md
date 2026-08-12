@@ -920,6 +920,10 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache uv run --locked pytest tests/test_pages_docs.py -q` — 5 passed。
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-cache make docs-check` — 成功（MkDocs strict build。MaterialのMkDocs 2.0に関するupstream noticeはstderrのみで、exit status 0）。
 - `git diff --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache uv run --locked pytest tests/test_pages_docs.py tests/test_ci_workflow_example.py -q` — 10 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make ci-check`、`uv lock --check` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make test` — 887 passed, 2 skipped。
+- GitHub Pages run `31586566899` — strict buildとdeployが成功。`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告は、現時点ではGitHubによりNode 24で実行され、deploy挙動は維持された。
 
 ### 2026-08-12: 利用者向けDocsのMkDocs移行
 
@@ -2818,3 +2822,4 @@ uv run --locked python scripts/verify_build.py dist
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
 | F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。順序は、(1) terminal-safe共通display/table primitives（既存ASCII outputのbytesを維持）、(2) opt-in rich summary report（JSONと既存text契約を不変）、(3) quietとstdout/stderr channelの一貫性、(4) TTY colorとする | リリース後のCLI text polish | `todo` |
+| F-011 | GitHub Actionsが`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告を出している。現時点はGitHub側のNode 24強制実行で挙動を変えず、upstreamの正式なNode 24対応majorが出た時点でpinned action majorを更新する | upstream releaseの監視と後続upgrade | `todo` |
