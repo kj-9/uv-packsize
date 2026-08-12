@@ -8,9 +8,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: CLI text safety foundation（`done`） |
+| 現在のPhase | Follow-up: CLI text polish（`in_progress`） |
 | `in_progress` | なし |
-| 次のタスク | F-010 第2段: opt-in rich summary reportを設計する |
+| 次のタスク | F-010 第2段 slice 2: opt-in rich summaryのCLI接続 |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,36 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第2段 slice 1 pure rich summary view/renderer
+
+状態: `done`
+
+変更:
+
+- `rich_report.py`に、fresh-install、project-lock、existing-prefixを閉じたenumで表す`RichAnalysisView`と、比較専用の`RichComparisonView`を追加した。viewはinput kind、build policy（prefixはunknown）、completeness、warning code/count、distribution count、canonical global bytes、distribution-owned aggregate、最大5件のnormalized distribution name/owned bytesだけを保持する。
+- comparison viewはversionを持たないtop changesと件数を保持し、project-lockだけ`lock_changed` boolを表す。raw requirements、path、resolved version、lock identity、context fingerprintはviewにもrendererにも渡さない。
+- rendererは共通terminal-safe table primitivesでASCII summaryを生成し、`Showing N of M`、top 5、canonical totalとdistribution-owned aggregate、aggregateとcanonicalの差（duplicate ownershipによる非一致）を明示する。CLI、README、Docs、JSON schema、既存text出力は変更していない。
+- source modelを再構成/再検証し、改ざんされたsource/result viewや不整合なviewをrenderer境界で拒否する。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv run --locked pytest tests/test_rich_report.py tests/test_text_render.py tests/test_render.py tests/test_diff_render.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-rich-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは71 passed、全体は908 passed / 2 skipped。format、lint、typecheck、README整合性、docs build、lock整合性、diff checkも成功した。
+- fresh/project/prefix input kind、prefix build policy unknown、warning/completeness、aggregate非一致、top five、comparison top changes、project `lock_changed`、raw version/path/requirement/lock identityの非保持、forged view拒否に加え、top rowsとowned aggregate、top changesとaggregate changeの再集計不変条件をnetwork不要のunit testで固定した。
+
+次のタスク:
+
+- F-010 第2段 slice 2として、既存text/JSON契約を保ったopt-in CLI接続を設計・実装する。
 
 ### 2026-08-12: F-010 第1段 terminal-safe CLI text primitives
 
