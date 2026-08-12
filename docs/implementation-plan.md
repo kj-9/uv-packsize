@@ -8,9 +8,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: baseline read hardening（`done`） |
+| 現在のPhase | Follow-up: config source hardening（`done`） |
 | `in_progress` | なし |
-| 次のタスク | F-009: config source immutable snapshot要否の再評価 |
+| 次のタスク | F-011 upstream Node 24対応releaseを監視する（対応major公開まで実装なし） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,37 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-009 budget config source observable rewrite hardening
+
+状態: `done`
+
+変更:
+
+- explicit `pyproject.toml` budget sourceのpre-open snapshotをdevice、inode、mode、size、mtime_ns、ctime_nsの固定tupleへ拡張し、open直後のdescriptorが同じregular file snapshotであることを検証するようにした。
+- bounded read後・close前にdescriptorの`fstat`とfollow後pathの`stat`を再取得し、両方がpre-open snapshotと全一致する場合だけcloseとparseへ進む。post-readのpath消失、非regular化、別inode置換、同一inode・同一lengthの観測可能なrewriteを`changed-file/file`として拒否する。
+- post-read再照合中のその他の`OSError`/`ValueError`は`read-failed/file`へsanitizationする。body errorはclose errorより優先し、body成功後のclose failureではparseせず`read-failed/file`とする既存lifecycleを維持した。
+- symlink-follow、`O_NOFOLLOW`を使わない方針、親directory policy、bounded read、normal policy parsingは変更していない。この契約はmetadataで観測可能なrewriteの拒否であり、filesystem-levelのimmutable snapshotは保証しない。
+- CLIで実際のpost-read mismatchを通し、exit 3、stdout empty、baseline loader/uv未実行、raw config path/content/baseline path/traceback非表示を検証した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f009-cache uv run --locked pytest tests/test_budget_config_source.py tests/test_uv_packsize.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f009-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f009-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f009-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused testsは192 passed、全体は1004 passed / 2 skipped。format、lint、typecheck、README Cog整合性、MkDocs strict buildも成功した。
+- pre/open/post snapshot、同一inode・同一length rewrite、post path消失/非regular/置換、read/close error優先、parse禁止、CLI error境界をdeterministicに回帰固定した。
+
+次のタスク:
+
+- 残るF-011はupstream actionの正式なNode 24対応major待ちであり、現時点では実装せずreleaseを監視する。
 
 ### 2026-08-12: F-008 baseline read descriptor-close hardening
 
@@ -3031,6 +3062,6 @@ uv run --locked python scripts/verify_build.py dist
 | F-006 | publish workflowのtest matrixがPython 3.9〜3.13のままで、projectの対応範囲と一致しない | P1-08 | `done` |
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。body errorを優先し、成功body後のclose failureではparseへ進まないdescriptor lifecycleへhardeningした | baseline read hardening | `done` |
-| F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
+| F-009 | P4-04dの`pyproject.toml` source readerへpre/open/postのdevice、inode、mode、size、mtime_ns、ctime_ns再照合を追加し、同一inode・同一lengthを含む観測可能なrewriteを拒否した。filesystem-level immutable snapshotは保証しない | config source observable rewrite hardening | `done` |
 | F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。terminal-safe共通display/table primitives、opt-in rich summary、progressだけを抑止する`--quiet`、default-offのTTY colorを完了した | リリース後のCLI text polish | `done` |
 | F-011 | GitHub Actionsが`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告を出している。現時点はGitHub側のNode 24強制実行で挙動を変えず、upstreamの正式なNode 24対応majorが出た時点でpinned action majorを更新する | upstream releaseの監視と後続upgrade | `todo` |

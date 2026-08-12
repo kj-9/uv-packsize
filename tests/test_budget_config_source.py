@@ -229,6 +229,179 @@ def test_regular_file_replacement_is_rejected_by_identity(tmp_path, monkeypatch)
     assert caught.value.reason is BudgetPolicySourceErrorReason.CHANGED_FILE
 
 
+def test_same_inode_same_length_observable_rewrite_is_rejected(tmp_path, monkeypatch):
+    original = "[tool.uv-packsize.budget]\nmax_total_logical_bytes = 1\n"
+    replacement = "[tool.uv-packsize.budget]\nmax_total_logical_bytes = 2\n"
+    assert len(replacement) == len(original)
+    path = write_project(tmp_path, original)
+    before = path.stat()
+    real_read = budget_config_source.os.read
+    rewritten = False
+
+    def rewrite_after_read(descriptor: int, count: int) -> bytes:
+        nonlocal rewritten
+        chunk = real_read(descriptor, count)
+        if chunk and not rewritten:
+            rewritten = True
+            path.write_text(replacement, encoding="utf-8")
+            budget_config_source.os.utime(
+                path,
+                ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000),
+            )
+            after = path.stat()
+            assert (after.st_dev, after.st_ino, after.st_size) == (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+            )
+        return chunk
+
+    monkeypatch.setattr(budget_config_source.os, "read", rewrite_after_read)
+
+    with pytest.raises(BudgetPolicySourceError) as caught:
+        load_budget_policy(path)
+
+    assert rewritten is True
+    assert caught.value.reason is BudgetPolicySourceErrorReason.CHANGED_FILE
+    assert caught.value.section is BudgetPolicySourceSection.FILE
+
+
+@pytest.mark.parametrize("post_change", ["missing", "replacement"])
+def test_post_read_path_change_is_rejected_as_changed_file(
+    tmp_path, monkeypatch, post_change
+):
+    path = write_project(tmp_path, "[tool.uv-packsize.budget]\n")
+    replacement = tmp_path / "replacement.toml"
+    replacement.write_text("[tool.uv-packsize.budget]\n", encoding="utf-8")
+    real_read = budget_config_source.os.read
+    changed = False
+
+    def change_after_read(descriptor: int, count: int) -> bytes:
+        nonlocal changed
+        chunk = real_read(descriptor, count)
+        if chunk and not changed:
+            changed = True
+            if post_change == "missing":
+                path.unlink()
+            else:
+                budget_config_source.os.replace(replacement, path)
+        return chunk
+
+    monkeypatch.setattr(budget_config_source.os, "read", change_after_read)
+
+    with pytest.raises(BudgetPolicySourceError) as caught:
+        load_budget_policy(path)
+
+    assert caught.value.reason is BudgetPolicySourceErrorReason.CHANGED_FILE
+
+
+def test_post_read_nonregular_path_is_changed_file(tmp_path, monkeypatch):
+    if not hasattr(budget_config_source.os, "mkfifo"):
+        pytest.skip()
+    path = write_project(tmp_path, "[tool.uv-packsize.budget]\n")
+    real_read = budget_config_source.os.read
+    changed = False
+
+    def replace_after_read(descriptor: int, count: int) -> bytes:
+        nonlocal changed
+        chunk = real_read(descriptor, count)
+        if chunk and not changed:
+            changed = True
+            path.unlink()
+            budget_config_source.os.mkfifo(path)
+        return chunk
+
+    monkeypatch.setattr(budget_config_source.os, "read", replace_after_read)
+
+    with pytest.raises(BudgetPolicySourceError) as caught:
+        load_budget_policy(path)
+
+    assert caught.value.reason is BudgetPolicySourceErrorReason.CHANGED_FILE
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (
+            FileNotFoundError("private post-read missing detail"),
+            BudgetPolicySourceErrorReason.CHANGED_FILE,
+        ),
+        (
+            ValueError("private post-read value detail"),
+            BudgetPolicySourceErrorReason.READ_FAILED,
+        ),
+        (
+            OSError("private post-read OS detail"),
+            BudgetPolicySourceErrorReason.READ_FAILED,
+        ),
+    ],
+)
+def test_post_read_stat_failures_are_sanitized(tmp_path, monkeypatch, failure, reason):
+    path = write_project(tmp_path, "[tool.uv-packsize.budget]\n")
+    real_fstat = budget_config_source.os.fstat
+    calls = 0
+
+    def fail_post_fstat(descriptor: int):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise failure
+        return real_fstat(descriptor)
+
+    monkeypatch.setattr(budget_config_source.os, "fstat", fail_post_fstat)
+
+    with pytest.raises(BudgetPolicySourceError) as caught:
+        load_budget_policy(path)
+
+    assert caught.value.reason is reason
+    assert "private post-read" not in str(caught.value)
+
+
+def test_body_failure_wins_over_close_failure_and_successful_body_requires_close(
+    tmp_path, monkeypatch
+):
+    path = write_project(tmp_path, "[tool.uv-packsize.budget]\n")
+    real_fstat = budget_config_source.os.fstat
+    calls = 0
+
+    def changed_post_fstat(descriptor: int):
+        nonlocal calls
+        calls += 1
+        observed = real_fstat(descriptor)
+        if calls == 1:
+            return observed
+        values = list(observed)
+        values[8] += 1
+        return budget_config_source.os.stat_result(values)
+
+    real_close = budget_config_source.os.close
+
+    def close_then_fail(descriptor: int) -> bool:
+        real_close(descriptor)
+        return False
+
+    monkeypatch.setattr(budget_config_source.os, "fstat", changed_post_fstat)
+    monkeypatch.setattr(budget_config_source, "_safe_close", close_then_fail)
+    with pytest.raises(BudgetPolicySourceError) as body_failure:
+        load_budget_policy(path)
+    assert body_failure.value.reason is BudgetPolicySourceErrorReason.CHANGED_FILE
+
+    monkeypatch.undo()
+    parse_calls = 0
+
+    def unexpected_parse(_payload):
+        nonlocal parse_calls
+        parse_calls += 1
+        raise AssertionError("parse must not run after close failure")
+
+    monkeypatch.setattr(budget_config_source, "_safe_close", close_then_fail)
+    monkeypatch.setattr(budget_config_source, "_parse", unexpected_parse)
+    with pytest.raises(BudgetPolicySourceError) as close_failure:
+        load_budget_policy(path)
+    assert close_failure.value.reason is BudgetPolicySourceErrorReason.READ_FAILED
+    assert parse_calls == 0
+
+
 def test_path_boundary_is_exact_and_parser_availability_is_sanitized(
     tmp_path, monkeypatch
 ):

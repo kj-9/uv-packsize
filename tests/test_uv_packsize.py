@@ -13,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 import uv_packsize.baseline as baseline_module
+import uv_packsize.budget_config_source as budget_source_module
 from uv_packsize.analysis import AnalysisContextError, AnalysisContextErrorCode
 from uv_packsize.baseline import BaselineError, load_baseline
 from uv_packsize.baseline_write import BaselineWriteError
@@ -530,6 +531,62 @@ def test_cli_budget_help_guards_and_source_failures_precede_baseline_and_uv(
     )
     assert prefix_policy.exit_code == 2
     assert "--max-total cannot be used with --prefix." in prefix_policy.output
+
+
+def test_cli_budget_observable_rewrite_is_safe_exit_three_before_other_inputs(
+    monkeypatch, tmp_path
+):
+    private_config = tmp_path / "credential-token-policy.toml"
+    private_config.write_text(
+        "[tool.uv-packsize.budget]\nmax_total_logical_bytes = 7 # private-content\n",
+        encoding="utf-8",
+    )
+    real_fstat = budget_source_module.os.fstat
+    calls = 0
+
+    def changed_post_fstat(descriptor: int):
+        nonlocal calls
+        calls += 1
+        observed = real_fstat(descriptor)
+        if calls == 1:
+            return observed
+        values = list(observed)
+        values[8] += 1
+        return budget_source_module.os.stat_result(values)
+
+    monkeypatch.setattr(budget_source_module.os, "fstat", changed_post_fstat)
+    monkeypatch.setattr(
+        "uv_packsize.cli.load_baseline",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("baseline loader must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        "uv_packsize.cli.shutil.which",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("uv must not run")),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--budget-config",
+            str(private_config),
+            "--baseline",
+            "private-baseline.json",
+            "sample==1.0",
+        ],
+    )
+
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    assert "code=changed-file, field=file" in result.stderr
+    for unsafe in (
+        "credential-token",
+        "private-content",
+        "private-baseline",
+        "Traceback",
+    ):
+        assert unsafe not in result.stderr
 
 
 def test_cli_budget_applies_field_overrides_and_keeps_json_machine_output_empty_on_fail(

@@ -6,11 +6,10 @@ search, environment lookup, or source merging.  An absent budget section means
 that this source supplies no policy; an explicitly empty budget table is the
 distinct, explicit no-op policy handled by :func:`parse_budget_policy`.
 
-The reader follows symlinks in the ordinary ``Path`` manner, but requires the
-opened target to be the same regular file observed before open.  It is not an
-immutable snapshot protocol: the same inode can be modified after the identity
-check or during read.  That boundary is intentional for read-only project
-configuration and is recorded in the implementation plan.
+The reader follows symlinks in the ordinary ``Path`` manner.  It rejects a
+regular file whose observable identity or rewrite metadata changes before,
+during, or immediately after the bounded read.  This detects observable
+rewrites; it does not claim filesystem-level immutable snapshot semantics.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from .budget_config import parse_budget_policy
 
 MAX_BUDGET_CONFIG_BYTES: Final = 1024 * 1024
 _NATIVE_PATH_TYPE: Final = type(Path("."))
+_FileSnapshot = tuple[int, int, int, int, int, int]
 
 
 class _TomlLoader(Protocol):
@@ -116,7 +116,7 @@ def load_budget_policy(path: Path) -> BudgetPolicy | None:
     return parse_budget_policy(mapping)
 
 
-def _read(path: Path) -> bytes:  # noqa: PLR0912
+def _read(path: Path) -> bytes:  # noqa: PLR0912, PLR0915
     try:
         before = path.stat()
     except FileNotFoundError:
@@ -130,6 +130,7 @@ def _read(path: Path) -> bytes:  # noqa: PLR0912
             BudgetPolicySourceErrorReason.NOT_REGULAR_FILE,
             BudgetPolicySourceSection.FILE,
         )
+    before_snapshot = _file_snapshot(before)
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
         descriptor = os.open(path, flags)
@@ -148,7 +149,7 @@ def _read(path: Path) -> bytes:  # noqa: PLR0912
                 BudgetPolicySourceErrorReason.NOT_REGULAR_FILE,
                 BudgetPolicySourceSection.FILE,
             )
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+        if _file_snapshot(opened) != before_snapshot:
             _fail(
                 BudgetPolicySourceErrorReason.CHANGED_FILE,
                 BudgetPolicySourceSection.FILE,
@@ -165,6 +166,43 @@ def _read(path: Path) -> bytes:  # noqa: PLR0912
             chunks.append(chunk)
             remaining -= len(chunk)
         payload = b"".join(chunks)
+        if len(payload) > MAX_BUDGET_CONFIG_BYTES:
+            _fail(
+                BudgetPolicySourceErrorReason.SIZE_LIMIT,
+                BudgetPolicySourceSection.FILE,
+            )
+        try:
+            after_opened = os.fstat(descriptor)
+        except FileNotFoundError:
+            _fail(
+                BudgetPolicySourceErrorReason.CHANGED_FILE,
+                BudgetPolicySourceSection.FILE,
+            )
+        if not stat.S_ISREG(after_opened.st_mode):
+            _fail(
+                BudgetPolicySourceErrorReason.CHANGED_FILE,
+                BudgetPolicySourceSection.FILE,
+            )
+        try:
+            after_path = path.stat()
+        except FileNotFoundError:
+            _fail(
+                BudgetPolicySourceErrorReason.CHANGED_FILE,
+                BudgetPolicySourceSection.FILE,
+            )
+        if not stat.S_ISREG(after_path.st_mode):
+            _fail(
+                BudgetPolicySourceErrorReason.CHANGED_FILE,
+                BudgetPolicySourceSection.FILE,
+            )
+        if (
+            _file_snapshot(after_opened) != before_snapshot
+            or _file_snapshot(after_path) != before_snapshot
+        ):
+            _fail(
+                BudgetPolicySourceErrorReason.CHANGED_FILE,
+                BudgetPolicySourceSection.FILE,
+            )
     except BudgetPolicySourceError as error:
         failure = error
     except (OSError, ValueError):
@@ -177,9 +215,18 @@ def _read(path: Path) -> bytes:  # noqa: PLR0912
         raise failure
     if close_failed:
         _fail(BudgetPolicySourceErrorReason.READ_FAILED, BudgetPolicySourceSection.FILE)
-    if len(payload) > MAX_BUDGET_CONFIG_BYTES:
-        _fail(BudgetPolicySourceErrorReason.SIZE_LIMIT, BudgetPolicySourceSection.FILE)
     return payload
+
+
+def _file_snapshot(value: os.stat_result) -> _FileSnapshot:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def _safe_close(descriptor: int) -> bool:
