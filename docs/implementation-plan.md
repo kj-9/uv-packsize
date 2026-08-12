@@ -9,8 +9,8 @@
 | 項目 | 状態 |
 |---|---|
 | 現在のPhase | Phase 6: エコシステム連携（`done`） |
-| `in_progress` | 利用者向けDocsのMkDocs移行 |
-| 次のタスク | MkDocsのstrict build・Pages deployを確認後、`0.2.0`安定版を外部公開する |
+| `in_progress` | なし |
+| 次のタスク | `0.2.0`安定版を外部公開する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -908,7 +908,7 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 
 ### 2026-08-12: 利用者向けDocsのMkDocs移行
 
-状態: `in_progress`（ローカル完了、Pages deploy確認待ち）
+状態: `done`
 
 変更:
 
@@ -927,7 +927,8 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make ci-check`、`uv lock --check`、`git diff --check` — 成功。
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-mkdocs-cache make test` — 886 passed, 2 skipped。
 - Desktopと390×844 viewportでHomeを表示し、navigation、CTA、カード、code copy、dark theme、mobile reflowを確認した。Material iconが文字列表示されないようemoji extensionを追加した。
-- GitHub Pages deployは、MkDocs基盤側のworkflow変更を含めて確認する予定。
+- GitHub Pages run `31585790543` — strict buildとdeployが成功し、`https://kj-9.github.io/uv-packsize/`で検索、navigation、CTA、locked-project導線を確認した。
+- 通常CI run `31585790594` — lock、lint、Python 3.10〜3.14の全jobが成功した。
 
 ### 2026-08-12: `0.2.0` 安定版リリース準備
 
