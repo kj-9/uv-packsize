@@ -10,6 +10,7 @@ from collections import Counter
 from uv_packsize.dependency_graph import DependencyGraphCompleteness
 from uv_packsize.dependency_paths import ExplainedAnalysisResult
 from uv_packsize.render import render_analysis_report
+from uv_packsize.text_render import safe_display
 
 
 def render_explained_analysis_report(
@@ -64,7 +65,7 @@ def render_explanation_sections(
 def _render_requested_roots(result: ExplainedAnalysisResult) -> str:
     lines = ["--- Requested Roots ---", "Input  Distribution  Status"]
     for root in result.graph.roots:
-        name = root.name if root.name is not None else "-"
+        name = safe_display(root.name) if root.name is not None else "-"
         lines.append(f"{root.input_index + 1}  {name}  {root.status.value}")
     if len(lines) == 2:
         lines.append("No requested roots.")
@@ -78,9 +79,9 @@ def _render_dependency_attribution(result: ExplainedAnalysisResult) -> str:
     ]
     for attribution in result.attributions:
         node = attribution.node
-        roots = ", ".join(node.root_names) or "-"
+        roots = ", ".join(safe_display(name) for name in node.root_names) or "-"
         lines.append(
-            f"{node.name}  {node.version}  {node.kind.value}  "
+            f"{safe_display(node.name)}  {safe_display(node.version)}  {node.kind.value}  "
             f"{'yes' if node.is_shared else 'no'}  {roots}"
         )
     if len(lines) == 2:
@@ -100,7 +101,10 @@ def _render_dependency_paths(result: ExplainedAnalysisResult) -> str:
         key=lambda path: (path.root_input_index, path.edge_count, path.nodes),
     )
     for path in paths:
-        lines.append(f"{path.root_input_index + 1}  {' -> '.join(path.nodes)}")
+        lines.append(
+            f"{path.root_input_index + 1}  "
+            + " -> ".join(safe_display(node) for node in path.nodes)
+        )
     if len(lines) == 2:
         lines.append("No dependency paths.")
     return "\n".join(lines)

@@ -13,6 +13,7 @@ from collections import Counter
 from uv_packsize.dependency_graph import DependencyGraphCompleteness
 from uv_packsize.footprint import FootprintResult
 from uv_packsize.render import format_size, render_analysis_report
+from uv_packsize.text_render import render_total_table
 
 
 def render_footprint_report(
@@ -123,26 +124,11 @@ def _render_total_table(
     footer_title: str,
     footer_value: int,
 ) -> str:
-    """Render a non-empty deterministic total table using shared size units."""
+    """Render a deterministic total table using shared safe primitives."""
 
-    name_width = max(
-        len(header_title), len(footer_title), *(len(name) for name, _ in rows)
+    return render_total_table(
+        title=title,
+        header=(header_title, "Size"),
+        rows=tuple((name, format_size(size)) for name, size in rows),
+        footer=(footer_title, format_size(footer_value)),
     )
-    size_width = max(
-        len("Size"),
-        len(format_size(footer_value)),
-        *(len(format_size(size)) for _name, size in rows),
-    )
-    separator = f"{'-' * name_width}  {'-' * size_width}"
-    lines = [
-        f"--- {title} ---",
-        f"{header_title.ljust(name_width)}  {'Size'.rjust(size_width)}",
-        separator,
-        *(
-            f"{name.ljust(name_width)}  {format_size(size).rjust(size_width)}"
-            for name, size in rows
-        ),
-        separator,
-        f"{footer_title.ljust(name_width)}  {format_size(footer_value).rjust(size_width)}",
-    ]
-    return "\n".join(lines)

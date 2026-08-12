@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import unicodedata
-
 from uv_packsize.diff import (
     MAX_BASELINE_INTEGER,
     AnalysisDiff,
@@ -12,6 +10,7 @@ from uv_packsize.diff import (
 )
 from uv_packsize.models import Completeness
 from uv_packsize.render import format_size
+from uv_packsize.text_render import render_table, safe_display
 
 
 def format_signed_size(delta: int) -> str:
@@ -194,19 +193,9 @@ def _render_nonreconciliation_note(diff: AnalysisDiff) -> str:
 
 
 def _safe_text(value: str) -> str:
-    """Return deterministic ASCII text whose ``len`` is its terminal width."""
+    """Backward-compatible private alias for the shared display primitive."""
 
-    escaped = []
-    for character in value:
-        if unicodedata.category(character).startswith("C"):
-            escaped.append("?")
-        elif " " <= character <= "~":
-            escaped.append(character)
-        elif ord(character) <= 0xFFFF:
-            escaped.append(f"\\u{ord(character):04X}")
-        else:
-            escaped.append(f"\\U{ord(character):08X}")
-    return "".join(escaped)
+    return safe_display(value)
 
 
 def _change_type(item: DistributionDelta) -> str:
@@ -227,22 +216,4 @@ def _render_table(
     rows: tuple[tuple[str, ...], ...],
     right_align_indexes: tuple[int, ...],
 ) -> tuple[str, ...]:
-    right_align = frozenset(right_align_indexes)
-    widths = tuple(
-        max(len(header[index]), *(len(row[index]) for row in rows))
-        for index in range(len(header))
-    )
-
-    def line(row: tuple[str, ...]) -> str:
-        return "  ".join(
-            value.rjust(widths[index])
-            if index in right_align
-            else value.ljust(widths[index])
-            for index, value in enumerate(row)
-        )
-
-    return (
-        line(header),
-        "  ".join("-" * width for width in widths),
-        *(line(row) for row in rows),
-    )
+    return render_table(header, rows, right_align_indexes)

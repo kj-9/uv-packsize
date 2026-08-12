@@ -8,6 +8,7 @@ the filesystem.  It only formats the inventory already retained by an
 from collections import Counter
 
 from uv_packsize.models import AnalysisResult, Completeness, FileCategory, FileEntry
+from uv_packsize.text_render import render_total_table
 
 _VENV_BINARIES_TITLE = "Binaries in .venv/bin"
 _PREFIX_BINARIES_TITLE = "Binaries in prefix"
@@ -167,33 +168,9 @@ def _render_table(
     footer_title: str,
     footer_value: int,
 ) -> str:
-    if not rows:
-        return "\n".join(
-            (
-                f"--- {title} ---",
-                "No items to display.",
-                f"{footer_title}  {format_size(footer_value)}",
-            )
-        )
-
-    name_width = max(
-        len(header_title), len(footer_title), *(len(name) for name, _ in rows)
+    return render_total_table(
+        title=title,
+        header=(header_title, "Size"),
+        rows=tuple((name, format_size(size)) for name, size in rows),
+        footer=(footer_title, format_size(footer_value)),
     )
-    size_width = max(
-        len("Size"),
-        len(format_size(footer_value)),
-        *(len(format_size(size)) for _name, size in rows),
-    )
-    separator = f"{'-' * name_width}  {'-' * size_width}"
-    lines = [
-        f"--- {title} ---",
-        f"{header_title.ljust(name_width)}  {'Size'.rjust(size_width)}",
-        separator,
-        *(
-            f"{name.ljust(name_width)}  {format_size(size).rjust(size_width)}"
-            for name, size in rows
-        ),
-        separator,
-        f"{footer_title.ljust(name_width)}  {format_size(footer_value).rjust(size_width)}",
-    ]
-    return "\n".join(lines)

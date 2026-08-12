@@ -138,6 +138,17 @@ def test_explanation_uses_sanitized_graph_warning_codes_without_secret_inputs():
     assert "not a requirement" not in report
 
 
+def test_explanation_escapes_metadata_control_and_wide_versions():
+    result = analysis(("root",), (("root", "v\x1b[31m\u2603"),))
+    explanation = explained(result, ("root", "v\x1b[31m\u2603", ()))
+
+    report = render_explained_analysis_report(explanation)
+
+    assert "v?[31m\\u2603" in report
+    assert "\x1b" not in report
+    assert report.isascii()
+
+
 @pytest.mark.parametrize("value", [None, object()])
 def test_explanation_renderer_rejects_non_explained_results(value: Any):
     with pytest.raises(TypeError, match="ExplainedAnalysisResult"):

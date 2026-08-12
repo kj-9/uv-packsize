@@ -8,9 +8,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Phase 6: エコシステム連携（`done`） |
+| 現在のPhase | Follow-up: CLI text safety foundation（`done`） |
 | `in_progress` | なし |
-| 次のタスク | `0.2.0`安定版を外部公開する |
+| 次のタスク | F-010 第2段: opt-in rich summary reportを設計する |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
 | Phase 2進捗 | 12 / 12タスク完了（Phase 2 `done`） |
 | Blocker | なし。P5-03cは公開`uv sync`経路をlocal-wheelで固定して進める。local root packageの測定は初期対象外。 |
@@ -905,6 +905,35 @@ P3-04は完了。次のタスクはP3-05とし、複数rootへのbyte寄与とsh
 - P5-02とする。project/lock analysis input/context contractを設計する。`uv workspace metadata`はP5-01で固定した非対応境界を越えない。
 
 ## 作業記録
+
+### 2026-08-12: F-010 第1段 terminal-safe CLI text primitives
+
+状態: `done`
+
+変更:
+
+- `safe_display()`を追加し、printable ASCIIはbytesを維持したまま、Unicode category `C`の制御文字を`?`へ、その他の非ASCIIを固定の`\\u`/`\\U` ASCII escapeへ正規化した。terminal、locale、`COLUMNS`は参照しない。
+- 形状検証、空表、右寄せを共通化したtable primitivesを追加し、通常analysis、diff、footprint、root contributionのhuman text tableへ適用した。
+- `--bin`のscript pathとdependency explanation内のroot/name/version/pathを共通display経由にし、ANSI escape、改行、wide Unicodeがhuman text reportの制御や列幅を壊さないようにした。JSON rendererとCLI channel/color/layoutの契約は変更していない。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-cache uv run --locked pytest tests/test_text_render.py tests/test_render.py tests/test_diff_render.py tests/test_footprint_render.py tests/test_root_contribution_render.py tests/test_explanation.py tests/test_budget_render.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-cache make ci-check
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-cache make test
+UV_CACHE_DIR=/private/tmp/uv-packsize-f010-cache uv lock --check
+git diff --check
+```
+
+結果:
+
+- focused renderer testsは102 passed、全体は900 passed / 2 skipped。format、lint、typecheck、README整合性、docs build、lock整合性、diff checkも成功した。
+- malicious script pathとinstalled metadata version、control/ANSI、wide Unicode、empty table、right alignment、`COLUMNS`/`TERM`/`LC_ALL`非依存を回帰テストで固定した。
+
+次のタスク:
+
+- F-010 第2段として、既存textとJSONを不変に保つopt-in rich summary reportを設計する。
 
 ### 2026-08-12: 利用者向けDocs Homeの実用化
 
@@ -2821,5 +2850,5 @@ uv run --locked python scripts/verify_build.py dist
 | F-007 | 実際にbuildされたdistributionのprovenanceを、uv diagnosticsやcacheから安全に確定できない。stableな上流featureと対応versionが確定するまで推測しない | P6-03（上流Issue草案）、上流stable feature待ち | `blocked` |
 | F-008 | 既存`load_baseline()`はdescriptor close時の`OSError`をsanitized `BaselineLoadError`へ変換しない。P4-03c writerは独自境界で処理し、既存read APIの変更は混在させなかった | 後続のbaseline read hardening | `todo` |
 | F-009 | P4-04dの`pyproject.toml` source readerはsymlink follow後のregular-file/device/inode identityを照合するが、同一inodeの内容をimmutable snapshotにはしない。identity照合後またはread中のin-place更新まで防ぐ必要性は、CLI config source導入時に再評価する | P4-04fまたはconfig source hardening | `todo` |
-| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。順序は、(1) terminal-safe共通display/table primitives（既存ASCII outputのbytesを維持）、(2) opt-in rich summary report（JSONと既存text契約を不変）、(3) quietとstdout/stderr channelの一貫性、(4) TTY colorとする | リリース後のCLI text polish | `todo` |
+| F-010 | CLI text polishは、P0のsecurity基盤や包括的なUX redesignと混在させず、リリース後の独立タスクとして扱う。第1段のterminal-safe共通display/table primitivesは完了した。次は、JSONと既存text契約を不変にするopt-in rich summary reportを設計し、その後quiet/stdout/stderr channelの一貫性、TTY colorへ進む | リリース後のCLI text polish | `in_progress` |
 | F-011 | GitHub Actionsが`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`、`setup-uv@v6`のNode.js 20廃止予告を出している。現時点はGitHub側のNode 24強制実行で挙動を変えず、upstreamの正式なNode 24対応majorが出た時点でpinned action majorを更新する | upstream releaseの監視と後続upgrade | `todo` |

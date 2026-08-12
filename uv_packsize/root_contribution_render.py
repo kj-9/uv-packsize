@@ -7,13 +7,13 @@ compositors render the ordinary analysis report once and suppress a duplicate
 safe graph-warning summary.
 """
 
-import unicodedata
 from collections import Counter
 
 from uv_packsize.dependency_graph import DependencyGraphCompleteness
 from uv_packsize.models import Completeness
 from uv_packsize.render import format_size, render_analysis_report
 from uv_packsize.root_contributions import RootContributionResult
+from uv_packsize.text_render import render_table, safe_display
 
 
 def render_root_contribution_report(
@@ -205,12 +205,9 @@ def _render_graph_warning_summary(result: RootContributionResult) -> str:
 
 
 def _safe_text(value: str) -> str:
-    """Replace terminal control characters without exposing control sequences."""
+    """Backward-compatible private alias for the shared display primitive."""
 
-    return "".join(
-        "?" if unicodedata.category(character).startswith("C") else character
-        for character in value
-    )
+    return safe_display(value)
 
 
 def _render_table(
@@ -218,35 +215,7 @@ def _render_table(
     header: tuple[str, ...],
     rows: tuple[tuple[str, ...], ...],
     right_align_indexes: tuple[int, ...],
-) -> list[str]:
-    """Render preformatted strings without changing their display values."""
+) -> tuple[str, ...]:
+    """Render preformatted strings with shared validation and safe display."""
 
-    right_align = frozenset(right_align_indexes)
-    if any(index < 0 or index >= len(header) for index in right_align):
-        raise ValueError("right_align_indexes must reference header columns")
-    if any(len(row) != len(header) for row in rows):
-        raise ValueError("rows must match the header column count")
-    widths = tuple(
-        max(len(header[index]), *(len(row[index]) for row in rows))
-        for index in range(len(header))
-    )
-    separator = "  ".join("-" * width for width in widths)
-    lines = [
-        "  ".join(
-            value.rjust(widths[index])
-            if index in right_align
-            else value.ljust(widths[index])
-            for index, value in enumerate(header)
-        ),
-        separator,
-    ]
-    lines.extend(
-        "  ".join(
-            value.rjust(widths[index])
-            if index in right_align
-            else value.ljust(widths[index])
-            for index, value in enumerate(row)
-        )
-        for row in rows
-    )
-    return lines
+    return render_table(header, rows, right_align_indexes)

@@ -193,6 +193,42 @@ def test_renderer_splits_scripts_into_deduplicated_prefix_relative_binary_rows()
     assert "Total size:  25 B" in report
 
 
+def test_renderer_escapes_terminal_controls_and_wide_script_paths():
+    result = AnalysisResult(
+        context=context(),
+        distributions=(
+            distribution(
+                "example",
+                file_entry(
+                    "bin/evil\x1b[31m\nwide\u3000",
+                    4,
+                    category=FileCategory.SCRIPT,
+                ),
+            ),
+        ),
+    )
+
+    report = render_analysis_report(result, show_scripts=True)
+
+    assert "bin/evil?[31m?wide\\u3000" in report
+    assert "\x1b" not in report
+    assert "\nwide" not in report
+    assert report.isascii()
+
+
+def test_renderer_does_not_read_terminal_or_locale_environment(monkeypatch):
+    result = AnalysisResult(
+        context=context(),
+        distributions=(distribution("example", file_entry("example.py", 4)),),
+    )
+    expected = render_analysis_report(result)
+    monkeypatch.setenv("COLUMNS", "1")
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.setenv("LC_ALL", "unavailable-locale")
+
+    assert render_analysis_report(result) == expected
+
+
 def test_renderer_can_use_the_fixed_existing_prefix_binary_title():
     result = AnalysisResult(
         context=context(),
