@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-08-12
+最終更新: 2026-08-13
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: 0.2.0 text defaults migration（`done`） |
+| 現在のPhase | Follow-up: Docs layout preview（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -17,6 +17,23 @@
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
 | 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
+
+### 2026-08-13: Docs layout preview
+
+状態: `done`
+
+変更:
+
+- desktopではトップタブを使わず、全ページで左のsection sidebarを表示するMkDocs Material標準navigationへ切り替えた。mobileでは従来どおりdrawer navigationを使う。
+- 本文の最大幅を少し広げ、Homeの実出力例をdefaultのrich reportと同じfixtureへ同期した。
+
+検証:
+
+- preview承認後、desktopのsection sidebarとmobile drawerのresponsive boundaryを回帰テストで固定した。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache uv run --locked pytest tests/test_pages_docs.py -q` — 7 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache make ci-check` — 成功（format、lint、typecheck、README整合性、MkDocs strict build）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache make test` — 1014 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache uv lock --check`、`git diff --check` — 成功。
 
 ## ステータス定義
 

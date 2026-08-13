@@ -9,14 +9,19 @@ uvx uv-packsize requests
 The command creates an isolated temporary environment, installs the requested dependency set, and prints a report like this:
 
 ```text
---- Package Sizes ---
-Package                 Size
-------------------  --------
-sample              1.50 KiB
-------------------  --------
-Total Package Size  1.50 KiB
+--- Rich Analysis Summary ---
+Input kind: fresh-install
+Build policy: wheel-only
+Completeness: complete
+Warnings: none
+Distributions: 1
+Canonical global size: 1.50 KiB
+Distribution-owned aggregate: 1.50 KiB
 
-Total size:  1.50 KiB
+--- Largest Distributions (Showing 1 of 1) ---
+Distribution  Owned size
+------------  ----------
+sample          1.50 KiB
 ```
 
 This is an actual report rendered from a fixed test fixture. Your package names, resolved dependencies, and sizes will differ.

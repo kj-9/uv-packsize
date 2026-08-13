@@ -16,7 +16,6 @@ from uv_packsize.models import (
     PathFlavor,
     ResolutionContext,
 )
-from uv_packsize.render import render_analysis_report
 from uv_packsize.rich_report import project_rich_analysis, render_rich_analysis_report
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -25,8 +24,8 @@ MKDOCS_CONFIG = PROJECT_ROOT / "mkdocs.yml"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 LOCKFILE = PROJECT_ROOT / "uv.lock"
 HOME_PAGE = PROJECT_ROOT / "docs" / "user-guide" / "index.md"
-SAMPLE_REPORT = (
-    PROJECT_ROOT / "tests" / "fixtures" / "docs" / "sample-analysis-report.txt"
+EXTRA_CSS = (
+    PROJECT_ROOT / "docs" / "user-guide" / "assets" / "stylesheets" / "extra.css"
 )
 SAMPLE_RICH_REPORT = (
     PROJECT_ROOT / "tests" / "fixtures" / "docs" / "sample-rich-analysis-report.txt"
@@ -76,6 +75,17 @@ def test_mkdocs_configuration_covers_the_user_guide():
         "Safety and limitations: reference/safety-and-limitations.md",
     ]:
         assert expected in config
+    assert "- navigation.tabs" not in config
+
+
+def test_docs_layout_keeps_sidebar_navigation_on_desktop_and_a_mobile_drawer():
+    config = MKDOCS_CONFIG.read_text()
+    stylesheet = EXTRA_CSS.read_text()
+
+    assert "- navigation.sections" in config
+    assert "@media screen and (min-width: 76.25em)" in stylesheet
+    assert ".md-grid" in stylesheet
+    assert ".md-content" in stylesheet
 
 
 def test_mkdocs_material_is_locked_with_the_project_version():
@@ -117,9 +127,9 @@ def test_user_guide_builds_without_strict_warnings(tmp_path):
 
 def test_home_page_embeds_a_tested_cli_report_example():
     result = _sample_analysis_result()
-    report = render_analysis_report(result)
+    report = render_rich_analysis_report(project_rich_analysis(result))
 
-    assert SAMPLE_REPORT.read_text().rstrip() == report
+    assert SAMPLE_RICH_REPORT.read_text().rstrip() == report
     assert f"```text\n{report}\n```" in HOME_PAGE.read_text()
 
 

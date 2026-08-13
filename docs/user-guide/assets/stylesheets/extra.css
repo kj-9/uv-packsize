@@ -21,3 +21,14 @@
   --md-code-fg-color: #eaf5f6;
   --md-typeset-a-color: #6fd4df;
 }
+
+/* Keep the guide structure visible on desktop while giving prose room to breathe. */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 76rem;
+  }
+
+  .md-content {
+    max-width: 52rem;
+  }
+}

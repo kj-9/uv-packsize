@@ -25,7 +25,6 @@ theme:
     - content.action.edit
     - navigation.footer
     - navigation.sections
-    - navigation.tabs
     - search.highlight
     - search.share
     - toc.follow
