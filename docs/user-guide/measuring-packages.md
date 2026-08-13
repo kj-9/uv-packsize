@@ -9,9 +9,19 @@ uvx uv-packsize 'iniconfig==2.0.0' six
 
 All requested packages and their resolved dependencies are installed together in one temporary environment. A shared dependency is installed once and counted once in the global total.
 
-## Explain a total
+## Choose output or save JSON with `--json`
 
-Add text-only views when you need more context:
+The default terminal report is a compact rich summary. Save the versioned result when another tool, review, or later comparison needs stable data:
+
+```bash
+uvx uv-packsize requests==2.32.5 --json > analysis.json
+```
+
+On success, standard output is exactly one JSON document. Check `schema_version` and `context.input_kind` before using a saved result. `--comparison-json` produces a versioned comparison document when a compatible baseline is supplied.
+
+## Explain a total with `--explain`
+
+Add text-only views when you need context for a result:
 
 ```bash
 uvx uv-packsize requests --explain
@@ -19,16 +29,39 @@ uvx uv-packsize requests --breakdown
 uvx uv-packsize 'package-a' 'package-b' --contributions
 ```
 
-- `--explain` shows observed dependency paths and direct, transitive, and shared attribution from installed Core Metadata. It is not resolver provenance.
-- `--breakdown` shows deduplicated global bytes by file category and, when the metadata graph is complete, dependency role.
-- `--contributions` shows exclusive, shared, and closure bytes per requested root. A closure is not a hypothetical uninstall calculation, and closures must not be summed.
+- `--explain` shows observed dependency paths and direct, transitive, and shared attribution from installed Core Metadata; it is not resolver provenance.
+- `--breakdown` groups deduplicated global bytes by file category and, when available, dependency role.
+- `--contributions` shows exclusive, shared, and closure bytes per requested root. Closures are not hypothetical uninstall calculations and must not be summed.
 
-These options affect only the text presentation and do not change a JSON result.
+These options change text presentation only, not the JSON result.
 
-## Use the report layouts
+## Show scripts separately with `--bin`
 
-The default `--report rich` layout provides a compact, redacted overview. To
-request the pre-0.2.0 full plain-text table, use:
+```bash
+uvx uv-packsize requests --bin
+```
+
+With `--report standard`, `--bin` moves RECORD-owned scripts from the package
+table into a separate Binaries table. With `--report rich`, it leaves the
+primary summary and Largest Distributions owned sizes unchanged, then appends
+the binary details section. Both layouts preserve the canonical global total,
+and `--bin` never changes JSON bytes.
+
+## Inspect an existing environment with `--prefix`
+
+`--prefix` is read-only: it does not run Python, invoke uv, or change the prefix. Supply every site-packages directory relative to the prefix and its filesystem case rule:
+
+```bash
+uvx uv-packsize --prefix .venv \
+  --site-packages lib/python3.12/site-packages \
+  --case-rule sensitive --json > prefix-analysis.json
+```
+
+`--site-packages` can be repeated. Prefix scans use a separate schema and do not support comparisons or budgets, so scan a stable prefix rather than one being changed concurrently. With `--bin`, prefix text output uses the heading `Binaries in prefix`; generated script sizes can differ from a fresh temporary installation because POSIX shebangs can include the installation path. In prefix JSON mode, `--bin` is accepted but ignored, preserving the same schema v2 bytes.
+
+## Choose a text layout with `--report`
+
+`--report rich` is the default compact overview. The legacy full plain-text table remains available when a script needs it:
 
 ```bash
 uvx uv-packsize requests --report standard --color never
@@ -50,79 +83,30 @@ Distribution  Owned size
 sample          1.50 KiB
 ```
 
-This example is generated from a fixed test result; actual names and sizes
-depend on the resolved environment. Rich analysis reports show at most five
-distributions and state `Showing 5 of N` when more were measured. They are
-ordered by owned bytes descending with normalized-name ties and have no rank
-number column. The rich
-primary summary omits raw requirements, installed paths, resolved versions,
-context fingerprints, and lock identities.
+The example is generated from a fixed test result; actual names and sizes depend on the resolved environment. Rich reports show at most five distributions. Their primary summary omits raw requirements, installed paths, resolved versions, context fingerprints, and lock identities. `--bin` can show script paths and `--explain` can show installed metadata, so use them carefully when sharing output. Full output and JSON channel details are in the [Measurement contract](reference/measurement-contract.md).
 
-The existing `--bin`, `--explain`, `--breakdown`, `--contributions`, budget,
-and baseline-writing behavior composes with the rich primary report. With a
-baseline, rich mode renders a redacted comparison summary and up to five
-non-zero distribution changes. Appended sections are not covered by the
-primary-summary redaction: `--bin` can display script paths, and `--explain`
-can display installed metadata including resolved versions and dependency
-information. `--json` and `--comparison-json` ignore `--report`, preserving
-their versioned output bytes.
-
-## Suppress progress messages
+## Suppress progress with `--quiet`
 
 Use `--quiet` when a script needs only the final report or JSON document:
 
 ```bash
-uvx uv-packsize requests --quiet
 uvx uv-packsize requests --json --quiet > analysis.json
 ```
 
-Quiet mode suppresses transient progress and completion messages across fresh,
-project/lock, and existing-prefix analysis. It does not suppress final standard
-or rich text, graph explanation sections, budget output, sanitized errors, or
-Click usage errors. Baseline comparison and writing keep their final output and
-file behavior. For `--json` and `--comparison-json`, stdout is byte-identical
-with and without `--quiet`; only routine stderr progress is removed.
+It removes routine progress and completion messages, not final output or sanitized errors. JSON bytes are unchanged.
 
-## Add terminal color
+## Control ANSI color with `--color`
 
-Color defaults to automatic terminal detection. Force or disable ANSI
-explicitly when needed:
+Color defaults to `auto`. Force or disable it explicitly when needed:
 
 ```bash
 uvx uv-packsize requests --report rich --color always
 uvx uv-packsize requests --report standard --color never
 ```
 
-`auto` colors the final stdout report only when stdout is a TTY, `TERM` is not
-`dumb`, and the `NO_COLOR` environment variable is absent. `always` overrides
-TTY, `TERM`, and `NO_COLOR`; `auto` is the displayed default. Only fixed report
-structure is decorated after terminal-safe rendering, so removing ANSI yields
-the same semantic text. Progress, completion messages, errors, usage output,
-and JSON-mode budget diagnostics remain plain. Both JSON modes ignore all
-color values without changing bytes or channels.
+`auto` decorates only a suitable stdout terminal; `--json` and `--comparison-json` ignore color values. The standard/never combination is the legacy text escape for scripts that cannot consume JSON.
 
-In 0.2.0, the human-readable defaults changed from standard/never to
-rich/auto. Scripts that parse text should pin `--report standard --color never`
-or, preferably, consume the versioned JSON output.
+## Next step
 
-## Save JSON
-
-```bash
-uvx uv-packsize requests==2.32.5 --json > analysis.json
-```
-
-On success, standard output is exactly one JSON document. Progress and sanitized operational errors go to standard error. Check `schema_version` and `context.input_kind` before interpreting a saved result.
-
-## Inspect an existing environment
-
-`--prefix` is read-only: it does not run Python, invoke uv, or change the prefix. Supply every site-packages directory relative to the prefix and declare its filesystem case rule:
-
-```bash
-uvx uv-packsize --prefix .venv \
-  --site-packages lib/python3.12/site-packages \
-  --case-rule sensitive --json > prefix-analysis.json
-```
-
-`--site-packages` can be repeated. Prefix scans use a distinct schema and do not support comparisons or budgets. Scan a stable prefix because a concurrent change can race validation and inventory collection.
-
-`--bin` moves RECORD-owned scripts into a separate text table without changing the global total or JSON bytes.
+- [Compare a baseline or enforce a budget](baselines-and-budgets.md) for package-request results.
+- [Measure a locked project](locked-projects.md) when `pyproject.toml` and `uv.lock` define the dependency set.

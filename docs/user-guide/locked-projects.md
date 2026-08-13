@@ -45,3 +45,7 @@ any appended legacy section keeps its existing disclosure contract.
 Use `--report standard --color never` for the pre-0.2.0 full plain-text layout.
 
 Use a baseline from the same input family; see [Baselines and budgets](baselines-and-budgets.md).
+
+## Next step
+
+[Compare a baseline or set a budget](baselines-and-budgets.md) for the same project-lock input family.

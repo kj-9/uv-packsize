@@ -24,6 +24,7 @@ MKDOCS_CONFIG = PROJECT_ROOT / "mkdocs.yml"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 LOCKFILE = PROJECT_ROOT / "uv.lock"
 HOME_PAGE = PROJECT_ROOT / "docs" / "user-guide" / "index.md"
+GUIDE_DIR = PROJECT_ROOT / "docs" / "user-guide"
 EXTRA_CSS = (
     PROJECT_ROOT / "docs" / "user-guide" / "assets" / "stylesheets" / "extra.css"
 )
@@ -140,6 +141,83 @@ def test_measuring_guide_embeds_a_tested_rich_report_example():
 
     assert SAMPLE_RICH_REPORT.read_text().rstrip() == report
     assert f"```text\n{report}\n```" in guide
+
+
+def test_home_compares_measurement_modes_with_their_capabilities_and_links():
+    home = HOME_PAGE.read_text()
+
+    for expected in [
+        "## Choose a measurement mode",
+        "| Package requests |",
+        "| Locked project |",
+        "| Existing prefix |",
+        "[Measure packages](measuring-packages.md)",
+        "[Measure a locked project](locked-projects.md)",
+        "measuring-packages.md#inspect-an-existing-environment-with-prefix",
+        "baseline and budget",
+    ]:
+        assert expected.lower() in home.lower()
+
+
+def test_guides_have_flow_searchable_controls_and_next_steps():
+    measuring = (GUIDE_DIR / "measuring-packages.md").read_text()
+    guides = {
+        "getting-started.md": ["measuring-packages.md", "locked-projects.md"],
+        "measuring-packages.md": [
+            "baselines-and-budgets.md",
+            "locked-projects.md",
+        ],
+        "locked-projects.md": ["baselines-and-budgets.md"],
+        "baselines-and-budgets.md": ["ci.md"],
+        "ci.md": ["reference/measurement-contract.md"],
+    }
+
+    for heading in [
+        "--json",
+        "--explain",
+        "--bin",
+        "--prefix",
+        "--report",
+        "--quiet",
+        "--color",
+    ]:
+        assert any(
+            line.startswith("## ") and heading in line
+            for line in measuring.splitlines()
+        )
+
+    for filename, links in guides.items():
+        guide = (GUIDE_DIR / filename).read_text()
+        assert "## Next step" in guide
+        for link in links:
+            assert link in guide
+
+    for expected in [
+        "RECORD-owned scripts",
+        "With `--report standard`, `--bin` moves RECORD-owned scripts from the package",
+        "With `--report rich`, it leaves the\nprimary summary and Largest Distributions owned sizes unchanged",
+        "Both layouts preserve the canonical global total,\nand `--bin` never changes JSON bytes",
+        "`Binaries in prefix`",
+        "schema v2 bytes",
+    ]:
+        assert expected in measuring
+
+
+def test_baseline_and_ci_guides_state_compatibility_and_read_only_flow():
+    baselines = (GUIDE_DIR / "baselines-and-budgets.md").read_text()
+    ci = (GUIDE_DIR / "ci.md").read_text()
+
+    assert '!!! note "Compatibility comes first"' in baselines
+    assert "package-request baselines only with package-request" in baselines
+    assert "project-lock baselines only with project-lock" in baselines
+    assert "--project pyproject.toml --lockfile uv.lock" in baselines
+    assert ci.startswith("# CI integration\n")
+    for step in [
+        "1. Generate and review a baseline",
+        "2. Optionally add a budget policy",
+        "3. In CI, compare against the committed baseline",
+    ]:
+        assert step in ci
 
 
 def _sample_analysis_result() -> AnalysisResult:

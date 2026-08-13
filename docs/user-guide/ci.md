@@ -1,6 +1,17 @@
-# CI
+# CI integration
 
-For a locked project, commit a reviewed baseline and optional budget policy, then run a read-only comparison:
+For a locked project, use a reviewed, read-only comparison flow:
+
+1. Generate and review a baseline from the explicit project and lock inputs.
+2. Optionally add a budget policy for an absolute or allowed-increase limit.
+3. In CI, compare against the committed baseline without rewriting it.
+
+```bash
+uvx uv-packsize --project pyproject.toml --lockfile uv.lock \
+  --json --write-baseline .ci/uv-packsize-baseline.json
+```
+
+Then commit the reviewed baseline and, if needed, add the policy described in [Baselines and budgets](baselines-and-budgets.md). CI performs the read-only comparison:
 
 ```bash
 uvx uv-packsize \
@@ -61,3 +72,7 @@ jobs:
 ```
 
 This needs only `contents: read`, no secrets, write permissions, PR comments, or automatic baseline updates. The comparison JSON is private temporary data and the summary exposes only fixed schema fields and byte totals, not requirements, paths, or lock contents.
+
+## Next step
+
+Review the [Measurement contract](reference/measurement-contract.md) before treating results as comparable across environments.

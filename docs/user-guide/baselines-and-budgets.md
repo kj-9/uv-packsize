@@ -1,5 +1,9 @@
 # Baselines and budgets
 
+!!! note "Compatibility comes first"
+
+    Compare package-request baselines only with package-request measurements, and project-lock baselines only with project-lock measurements. Existing-prefix results are a separate family and cannot be compared or budgeted yet. Matching input family is necessary but not sufficient: Python, platform, build policy, and resolution context must also be compatible.
+
 ## Compare a baseline
 
 Record a fresh package-request measurement, then compare the same kind of measurement:
@@ -12,7 +16,7 @@ uvx uv-packsize requests==2.32.5 --baseline baseline.json --comparison-json
 
 The default is a text diff; `--comparison-json` writes a versioned comparison document. Measurements must have compatible definitions and resolution contexts, including requirements, Python/platform fingerprints, build policy, and resolver conditions.
 
-Comparisons are only supported within an input family: fresh-install schema v1 with v1, or project-lock schema v3 with v3. Existing-prefix schema v2 is not comparable yet. An incomplete but compatible comparison completes and labels its deltas as partial; an incompatible baseline exits with status 4.
+An incomplete but compatible comparison completes and labels its deltas as partial; an incompatible baseline exits with status 4.
 
 ## Write a baseline
 
@@ -20,6 +24,13 @@ For fresh-install or project/lock mode, save the same JSON emitted by `--json`:
 
 ```bash
 uvx uv-packsize requests==2.32.5 --json --write-baseline baseline.json
+```
+
+For a locked project, write a baseline from the exact explicit inputs that CI will compare:
+
+```bash
+uvx uv-packsize --project pyproject.toml --lockfile uv.lock \
+  --json --write-baseline .ci/uv-packsize-baseline.json
 ```
 
 Existing targets are left untouched unless replacement is explicit:
@@ -51,3 +62,7 @@ uvx uv-packsize requests==2.32.5 --baseline baseline.json \
 `--max-total` and `--max-increase` are non-negative byte limits on canonical global logical bytes. A command-line field overrides only that field from the file. An increase limit needs a compatible baseline.
 
 A policy with a limit fails incomplete measurements by default. `--incomplete-policy allow-partial` suppresses only that incomplete-result violation; observed limits are still checked. A budget violation exits 5 and writes no standard output in JSON modes.
+
+## Next step
+
+[Add a CI check](ci.md) that reads the reviewed baseline without changing it.

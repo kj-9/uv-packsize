@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: Docs layout preview（`done`） |
+| 現在のPhase | Follow-up: Docs content and IA improvement（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -34,6 +34,23 @@
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache make ci-check` — 成功（format、lint、typecheck、README整合性、MkDocs strict build）。
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache make test` — 1014 passed, 2 skipped。
 - `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-final-cache uv lock --check`、`git diff --check` — 成功。
+
+### 2026-08-13: Docs content and IA improvement
+
+状態: `done`
+
+変更:
+
+- Homeへ三つのmeasurement modeとbaseline/budget対応を比較する簡潔な表を追加し、guideを利用フロー順と一貫した次の導線へ整理する。
+- package、project-lock、prefixのbaseline compatibility、locked project baseline生成、CIのread-only comparison手順を明確化する。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-bin-layout-cache uv run --locked pytest tests/test_pages_docs.py -q` — 10 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-bin-layout-cache make docs-check` — 成功（MkDocs strict build）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-ia-final-cache make ci-check` — 成功（format、lint、typecheck、README整合性、MkDocs strict build）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-ia-final-cache make test` — 1017 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-docs-ia-final-cache uv lock --check`、`git diff --check` — 成功。
 
 ## ステータス定義
 
