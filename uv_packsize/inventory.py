@@ -196,10 +196,42 @@ def _is_contained(
     )
 
 
+def _case_insensitive_matches(
+    current: Path,
+    part: str,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None,
+) -> tuple[bool, list[str]]:
+    try:
+        is_directory = current.is_dir()
+        if not is_directory:
+            return False, []
+        if directory_index is None:
+            names = tuple(sorted(child.name for child in current.iterdir()))
+        else:
+            indexed = directory_index.get(current)
+            if indexed is None:
+                try:
+                    indexed = tuple(sorted(child.name for child in current.iterdir()))
+                except OSError:
+                    indexed = FilesystemInventoryError(
+                        "physical directory could not be inspected"
+                    )
+                directory_index[current] = indexed
+            if isinstance(indexed, Exception):
+                raise indexed
+            names = indexed
+        return True, [name for name in names if name.casefold() == part.casefold()]
+    except OSError as error:
+        raise FilesystemInventoryError(
+            "physical directory could not be inspected"
+        ) from error
+
+
 def _physical_path(
     prefix: Path,
     relative_parts: tuple[str, ...],
     case_rule: CaseRule,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> Path:
     current = prefix
     try:
@@ -220,25 +252,13 @@ def _physical_path(
                 "physical path could not be inspected"
             ) from error
         physical_part = part
-        try:
-            if case_rule is CaseRule.INSENSITIVE:
-                is_directory = current.is_dir()
-                matches = (
-                    sorted(
-                        child.name
-                        for child in current.iterdir()
-                        if child.name.casefold() == part.casefold()
-                    )
-                    if is_directory
-                    else []
-                )
-            else:
-                is_directory = False
-                matches = []
-        except OSError as error:
-            raise FilesystemInventoryError(
-                "physical directory could not be inspected"
-            ) from error
+        if case_rule is CaseRule.INSENSITIVE:
+            is_directory, matches = _case_insensitive_matches(
+                current, part, directory_index
+            )
+        else:
+            is_directory = False
+            matches = []
         if case_rule is CaseRule.INSENSITIVE and is_directory:
             if len(matches) > 1:
                 raise InvalidRecordPathError(
@@ -346,6 +366,7 @@ def resolve_record_path(
     layout: InventoryLayout,
     dist_info_dir: Path,
     record_path: str,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> ResolvedRecordPath:
     """Resolve one RECORD path lexically without following symlinks."""
 
@@ -372,6 +393,7 @@ def resolve_record_path(
             layout.physical_prefix,
             relative_parts,
             layout.case_rule,
+            directory_index,
         ),
         path=display_path,
         canonical_identity=canonical_identity,
@@ -382,6 +404,7 @@ def resolve_supplemental_path(
     *,
     layout: InventoryLayout,
     supplemental_path: str,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> ResolvedRecordPath:
     """Resolve one explicitly-owned path relative to the measurement prefix."""
 
@@ -407,6 +430,7 @@ def resolve_supplemental_path(
             layout.physical_prefix,
             relative_parts,
             layout.case_rule,
+            directory_index,
         ),
         path=display_path,
         canonical_identity=_key(display_path, layout.case_rule),
@@ -684,22 +708,29 @@ def _bytecode_candidates(
     source: FileEntry,
     *,
     cache_index: dict[Path, tuple[Path, ...] | Exception],
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> tuple[Path, ...]:
     source_parts = tuple(source.path.split("/"))
     source_path = _physical_path(
         layout.physical_prefix,
         source_parts,
         layout.case_rule,
+        directory_index,
     )
-    direct_candidate = _physical_path(
-        layout.physical_prefix,
-        (*source_parts[:-1], f"{source_path.stem}.pyc"),
-        layout.case_rule,
-    )
+    if layout.case_rule is CaseRule.SENSITIVE:
+        direct_candidate = source_path.parent / f"{source_path.stem}.pyc"
+    else:
+        direct_candidate = _physical_path(
+            layout.physical_prefix,
+            (*source_parts[:-1], f"{source_path.stem}.pyc"),
+            layout.case_rule,
+            directory_index,
+        )
     cache_dir = _physical_path(
         layout.physical_prefix,
         (*source_parts[:-1], "__pycache__"),
         layout.case_rule,
+        directory_index,
     )
     indexed = cache_index.get(cache_dir)
     if indexed is None:
@@ -728,6 +759,7 @@ def _generated_bytecode(
     record_entries: tuple[FileEntry, ...],
     identities: set[str],
     distribution_identity: str,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> tuple[tuple[FileEntry, ...], tuple[AnalysisWarning, ...]]:
     generated: list[FileEntry] = []
     warnings: list[AnalysisWarning] = []
@@ -740,6 +772,7 @@ def _generated_bytecode(
                 layout,
                 source,
                 cache_index=cache_index,
+                directory_index=directory_index,
             )
         except RecordPathOutsidePrefixError:
             warnings.append(
@@ -803,6 +836,7 @@ def _collect_record_entries(
     dist_info_dir: Path,
     recorded_paths: list[str],
     distribution_identity: str,
+    directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
 ) -> tuple[
     tuple[FileEntry, ...],
     tuple[AnalysisWarning, ...],
@@ -817,6 +851,7 @@ def _collect_record_entries(
                 layout=layout,
                 dist_info_dir=dist_info_dir,
                 record_path=recorded_path,
+                directory_index=directory_index,
             )
         except InvalidRecordPathError:
             warnings.append(
@@ -897,6 +932,7 @@ def _collect_record_entries(
         record_entries=tuple(entries),
         identities=identities,
         distribution_identity=distribution_identity,
+        directory_index=directory_index,
     )
     return (
         (*entries, *generated_entries),
@@ -1012,11 +1048,13 @@ def collect_distribution(
         layout,
         record_path,
     ).canonical_identity
+    directory_index: dict[Path, tuple[str, ...] | Exception] = {}
     entries, warnings, seen_identities = _collect_record_entries(
         layout=layout,
         dist_info_dir=dist_info_dir,
         recorded_paths=recorded_paths,
         distribution_identity=distribution_identity,
+        directory_index=directory_index,
     )
     record_completeness_warnings = (
         ()

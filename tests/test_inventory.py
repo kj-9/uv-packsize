@@ -442,6 +442,174 @@ def test_generated_bytecode_cache_is_indexed_once_per_directory(tmp_path, monkey
     }
 
 
+def test_case_insensitive_resolution_indexes_each_directory_once(tmp_path, monkeypatch):
+    layout, dist_info = windows_layout(tmp_path)
+    source_dir = layout.physical_site_packages / "Package"
+    first_source = source_dir / "first.py"
+    second_source = source_dir / "second.py"
+    source_dir.mkdir()
+    first_source.write_bytes(b"first")
+    second_source.write_bytes(b"second")
+    write_metadata(dist_info)
+    write_record(
+        dist_info,
+        [(r"PACKAGE\FIRST.PY", "", ""), (r"PACKAGE\SECOND.PY", "", "")],
+    )
+
+    original_iterdir = Path.iterdir
+    directory_scans = 0
+
+    def counted_iterdir(path):
+        nonlocal directory_scans
+        if path == source_dir:
+            directory_scans += 1
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", counted_iterdir)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert len(without_record_file(result)) == 2
+    assert directory_scans == 1
+
+
+def test_case_insensitive_resolution_keeps_ambiguity_error_with_index(
+    tmp_path, monkeypatch
+):
+    layout, dist_info = windows_layout(tmp_path)
+    source_dir = layout.physical_site_packages / "Package"
+    source_dir.mkdir()
+    write_metadata(dist_info)
+    write_record(dist_info, [(r"PACKAGE\EXAMPLE.PY", "", "")])
+
+    # A case-insensitive host may not permit two case-only names to coexist.
+    # Inject the directory listing so the target-platform ambiguity contract is
+    # tested independently of the host filesystem's case behavior.
+    original_iterdir = Path.iterdir
+
+    def ambiguous_iterdir(path):
+        if path == source_dir:
+            return iter((source_dir / "Example.py", source_dir / "example.py"))
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", ambiguous_iterdir)
+
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert without_record_file(result) == ()
+    assert [warning.code for warning in result.warnings] == [
+        WarningCode.INVALID_RECORD_PATH
+    ]
+
+
+def test_case_insensitive_index_does_not_enumerate_intermediate_symlink_target(
+    tmp_path,
+    monkeypatch,
+):
+    layout, dist_info = windows_layout(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_bytes(b"secret")
+    (layout.physical_site_packages / "Package").symlink_to(
+        outside,
+        target_is_directory=True,
+    )
+    write_metadata(dist_info)
+    write_record(dist_info, [(r"PACKAGE\SECRET.PY", "", "")])
+
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(path):
+        if path == outside:
+            raise AssertionError("outside directory must not be enumerated")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert without_record_file(result) == ()
+    assert [warning.code for warning in result.warnings] == [
+        WarningCode.RECORD_PATH_OUTSIDE_PREFIX
+    ]
+
+
+def test_case_insensitive_directory_index_preserves_filesystem_error_warnings(
+    tmp_path,
+    monkeypatch,
+):
+    layout, dist_info = windows_layout(tmp_path)
+    source_dir = layout.physical_site_packages / "Package"
+    source_dir.mkdir()
+    (source_dir / "first.py").write_bytes(b"first")
+    (source_dir / "second.py").write_bytes(b"second")
+    write_metadata(dist_info)
+    write_record(
+        dist_info,
+        [(r"PACKAGE\FIRST.PY", "", ""), (r"PACKAGE\SECOND.PY", "", "")],
+    )
+
+    original_iterdir = Path.iterdir
+    directory_scans = 0
+
+    def guarded_iterdir(path):
+        nonlocal directory_scans
+        if path == source_dir:
+            directory_scans += 1
+            raise PermissionError("denied")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    original_collect = inventory_module._collect_record_entries
+    collected_warning_batches = []
+
+    def capture_collect(**kwargs):
+        entries, warnings, identities = original_collect(**kwargs)
+        collected_warning_batches.append(warnings)
+        return entries, warnings, identities
+
+    monkeypatch.setattr(inventory_module, "_collect_record_entries", capture_collect)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert without_record_file(result) == ()
+    assert directory_scans == 1
+    # Each affected RECORD row receives its own warning before the result model
+    # applies its existing public warning deduplication contract.
+    assert [warning.code for warning in collected_warning_batches[0]] == [
+        WarningCode.FILESYSTEM_LAYOUT_ERROR,
+        WarningCode.FILESYSTEM_LAYOUT_ERROR,
+    ]
+    assert [warning.code for warning in result.warnings] == [
+        WarningCode.FILESYSTEM_LAYOUT_ERROR
+    ]
+
+
+def test_generated_bytecode_resolves_source_once_per_candidate(tmp_path, monkeypatch):
+    layout, dist_info = posix_layout(tmp_path)
+    write_metadata(dist_info)
+    source_dir = layout.physical_site_packages / "example"
+    source_dir.mkdir()
+    (source_dir / "first.py").write_bytes(b"first")
+    (source_dir / "second.py").write_bytes(b"second")
+    write_record(
+        dist_info,
+        [("example/first.py", "", ""), ("example/second.py", "", "")],
+    )
+
+    original_physical_path = inventory_module._physical_path
+    physical_path_calls = 0
+
+    def counted_physical_path(*args, **kwargs):
+        nonlocal physical_path_calls
+        physical_path_calls += 1
+        return original_physical_path(*args, **kwargs)
+
+    monkeypatch.setattr(inventory_module, "_physical_path", counted_physical_path)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert len(without_record_file(result)) == 2
+    # Three RECORD rows plus source/cache resolution for each of two sources.
+    assert physical_path_calls == 7
+
+
 def test_missing_file_and_duplicate_record_entry_are_typed_warnings(tmp_path):
     layout, dist_info = posix_layout(tmp_path)
     write_metadata(dist_info)
