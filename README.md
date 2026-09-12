@@ -202,9 +202,17 @@ changes either input file.
 
 ```bash
 uv-packsize --project pyproject.toml --lockfile uv.lock --json > analysis.json
-uv-packsize --project pyproject.toml --lockfile uv.lock --group test
-uv-packsize --project pyproject.toml --lockfile uv.lock --all-groups --extra docs
 uv-packsize --project pyproject.toml --lockfile uv.lock --report rich
+```
+
+These commands must be run against a project/lock pair in the supported subset;
+they are not examples for analyzing this `uv-packsize` repository itself. To
+include optional selections, replace the names below with groups and extras
+declared by both of your input files:
+
+```bash
+uv-packsize --project pyproject.toml --lockfile uv.lock --group YOUR_GROUP
+uv-packsize --project pyproject.toml --lockfile uv.lock --all-groups --extra YOUR_EXTRA
 ```
 
 The default selects no dependency groups. Add a repeatable `--group NAME`, or
@@ -250,9 +258,14 @@ declare its filesystem case rule explicitly:
 
 ```bash
 uv-packsize --prefix .venv \
-  --site-packages lib/python3.12/site-packages \
+  --site-packages YOUR_RELATIVE_SITE_PACKAGES \
   --case-rule sensitive --json > prefix-analysis.json
 ```
+
+Replace `YOUR_RELATIVE_SITE_PACKAGES` with the environment's actual path
+relative to `.venv`, for example `lib/python3.12/site-packages` on a typical
+POSIX Python 3.12 virtual environment. Choose the case rule that matches the
+filesystem being scanned.
 
 `--site-packages` is repeatable. Its value must be a non-empty, canonical
 relative path in the native path form of the host running the command; absolute
@@ -316,7 +329,7 @@ a build backend.
 You can also specify multiple packages to calculate the total size of all of them combined.
 
 ```bash
-uv-packsize 'iniconfig==2.0.0' six
+uv-packsize 'iniconfig==2.0.0' six --report standard --color never
 ```
 ```bash
 Calculating size for 2 requested packages...
@@ -437,8 +450,8 @@ respectively). It is useful when the measurement is both a CI artifact and the
 next comparison input:
 
 ```bash
-uv-packsize requests==2.32.5 --json --write-baseline baseline.json
-uv-packsize requests==2.32.5 --baseline baseline.json
+uv-packsize requests==2.32.5 --json --write-baseline next-baseline.json
+uv-packsize requests==2.32.5 --baseline next-baseline.json
 ```
 
 On success, `--json --write-baseline` writes byte-identical JSON to stdout and
@@ -453,7 +466,7 @@ explicit opt-in:
 
 ```bash
 uv-packsize requests==2.32.5 --json \
-  --write-baseline baseline.json --overwrite-baseline
+  --write-baseline next-baseline.json --overwrite-baseline
 ```
 
 `--overwrite-baseline` requires `--write-baseline`. Writing is unavailable with
@@ -473,7 +486,7 @@ dependent even when directory fsync is available. On Windows and other
 unsupported platforms, keep using the portable existing path:
 
 ```bash
-uv-packsize requests==2.32.5 --json > baseline.json
+uv-packsize requests==2.32.5 --json > portable-baseline.json
 ```
 
 ### Size budgets

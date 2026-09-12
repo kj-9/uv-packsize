@@ -95,6 +95,22 @@ def test_project_build_config_limits_setuptools_package_discovery():
     assert re.search(r'^include = \["uv_packsize\*"\]$', package_find, re.MULTILINE)
 
 
+def test_readme_examples_distinguish_runnable_commands_from_user_inputs():
+    readme = (PROJECT_ROOT / "README.md").read_text()
+
+    assert "uvx uv-packsize requests==2.32.5" in readme
+    assert (
+        "uv-packsize 'iniconfig==2.0.0' six --report standard --color never" in readme
+    )
+    assert "--site-packages YOUR_RELATIVE_SITE_PACKAGES" in readme
+    assert "--group YOUR_GROUP" in readme
+    assert "--all-groups --extra YOUR_EXTRA" in readme
+    assert "replace the names below" in readme
+    assert "Replace `YOUR_RELATIVE_SITE_PACKAGES`" in readme
+    assert "--write-baseline next-baseline.json" in readme
+    assert "> portable-baseline.json" in readme
+
+
 def test_lock_root_metadata_matches_project():
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
     project = pyproject.partition("[project]")[2].partition("\n[")[0]

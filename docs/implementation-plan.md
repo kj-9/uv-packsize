@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: explicit prerelease resolution policy（`done`） |
+| 現在のPhase | Follow-up: README executable example audit（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -17,6 +17,26 @@
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
 | 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
+
+### 2026-09-12: README executable example audit
+
+状態: `done`
+
+変更:
+
+- READMEの全23 shell blockを棚卸しし、実行可能なpackage、JSON、baseline、表示、install、開発commandと、明示inputを必要とするproject、prefix、budget、CI templateを分離した。
+- 複数package例のcommandを掲載済みstandard outputと一致する`--report standard --color never`へ修正した。
+- 存在を保証できない`test` group、`docs` extra、Python 3.12固定site-packagesをliteralなcopy-paste例から除き、利用者自身の宣言済みgroup/extraと実際のrelative site-packagesへ置換するtemplateであることを明記した。
+- READMEを上から試した場合にもno-clobber baseline writerの例が既存`baseline.json`と衝突しないよう、writer例を`next-baseline.json`、portable redirect例を`portable-baseline.json`へ分離した。
+- READMEの実行例と利用者入力templateの境界を静的回帰テストで固定した。project/lock、prefix、baseline、budgetの動作は既存offline E2Eと合わせて再検証した。
+
+検証:
+
+- package request、standard/rich/color/quiet、JSON、explicit prerelease、複数package、Airflow、baseline text/JSON comparisonを現行CLIで実行し、すべてexit 0を確認した。
+- isolated `UV_TOOL_DIR`で`uv tool install --refresh uv-packsize`を実行し、公開済み`0.1.1`のinstall成功を確認した。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-readme-final-cache make sync` — 成功。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-readme-final-cache uv run --locked pytest tests/test_project_lock_e2e.py tests/test_local_wheel_integration.py tests/test_uv_packsize.py -q` — 201 passed。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-readme-final-cache make check` — 成功（1020 passed, 2 skipped）。
 
 ### 2026-09-12: Explicit prerelease resolution policy
 
