@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: Docs content and IA improvement（`done`） |
+| 現在のPhase | Follow-up: explicit prerelease resolution policy（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -17,6 +17,28 @@
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
 | 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
+
+### 2026-09-12: Explicit prerelease resolution policy
+
+状態: `done`
+
+目的:
+
+- package requestの内部`uv pip install`が呼び出し元projectや環境のprerelease設定に左右されないよう、解決policyを明示する。
+- 安定版を優先しつつ必要な依存だけpre-releaseを許可する既定値と、利用者が上書きできるCLI契約を追加する。
+- 現状では失敗するREADMEの`apache-airflow==3.0.0`例を、実際の挙動と必要な注意点が分かる内容へ修正する。
+
+変更:
+
+- package requestの内部`uv pip install`へ`--prerelease`を常に明示し、ambient projectまたは`UV_PRERELEASE`に依存しないようにした。既定値はstable releaseを優先し、必要な場合だけpre-release dependencyを選ぶ`if-necessary`とした。
+- package request専用の`--prerelease {disallow,allow,if-necessary,explicit,if-necessary-or-explicit}`を追加した。実効policyは既存schemaの`context.resolution_strategy`へ保存し、異なるpolicyのbaselineを同一contextとして比較しない。
+- READMEの基本例を`requests==2.32.5`へ変更し、Airflowはpre-release dependencyの説明例へ移した。MkDocs利用者ガイドにもpolicy、build permissionとの違い、locked-project境界を記載した。
+
+検証:
+
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-prerelease-check-cache make ci-check` — 成功（format、lint、typecheck、README生成整合性、MkDocs strict build）。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-prerelease-test-cache make test` — 1019 passed, 2 skipped。
+- `UV_CACHE_DIR=/private/tmp/uv-packsize-airflow-fixed-cache .venv/bin/uv-packsize apache-airflow==3.0.0 --allow-build --quiet --report rich --color never` — 成功。133 distributions、canonical global size 130.00 MiB、complete、warningなし。
 
 ### 2026-08-13: Docs layout preview
 

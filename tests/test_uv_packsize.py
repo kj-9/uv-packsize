@@ -391,6 +391,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
     breakdown=False,
     contributions=False,
     allow_build=False,
+    prerelease_policy=None,
     baseline=None,
     comparison_json=False,
     write_baseline=None,
@@ -416,7 +417,13 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
         return str(Path(venv_dir) / python.relative_to(venv_path))
 
     def install_package(
-        _python_executable, names, *, build_policy, err=False, quiet=False
+        _python_executable,
+        names,
+        *,
+        build_policy,
+        prerelease_policy,
+        err=False,
+        quiet=False,
     ):
         assert err is (
             json_output or baseline is not None or write_baseline is not None
@@ -425,6 +432,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
             BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
         )
         assert build_policy is expected_policy
+        assert prerelease_policy == (prerelease_policy_argument or "if-necessary")
         package_count = len(names)
         package_label = "package" if package_count == 1 else "packages"
         possessive = "its" if package_count == 1 else "their"
@@ -438,6 +446,7 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
     monkeypatch.setattr("uv_packsize.cli._install_package", install_package)
     _mock_successful_uv_version(monkeypatch)
     arguments = [*package_names]
+    prerelease_policy_argument = prerelease_policy
     if show_scripts:
         arguments.append("--bin")
     if json_output:
@@ -452,6 +461,8 @@ def _run_local_layout(  # noqa: PLR0912, PLR0913, PLR0915
         arguments.append("--contributions")
     if allow_build:
         arguments.append("--allow-build")
+    if prerelease_policy is not None:
+        arguments.extend(("--prerelease", prerelease_policy))
     if baseline is not None:
         arguments.extend(("--baseline", str(baseline)))
     if write_baseline is not None:
@@ -3145,6 +3156,8 @@ def test_create_venv_propagates_uv_failure(monkeypatch, tmp_path):
                 "install",
                 "--python",
                 "/venv/bin/python",
+                "--prerelease",
+                "if-necessary",
                 "--no-build",
                 "example==1.0",
             ],
@@ -3157,6 +3170,8 @@ def test_create_venv_propagates_uv_failure(monkeypatch, tmp_path):
                 "install",
                 "--python",
                 "/venv/bin/python",
+                "--prerelease",
+                "if-necessary",
                 "example==1.0",
             ],
         ),
@@ -3181,6 +3196,62 @@ def test_install_package_propagates_uv_failure(
         )
 
     assert raised.value is failure
+
+
+def test_install_package_forwards_explicit_prerelease_policy(monkeypatch):
+    observed = None
+
+    def succeed(command):
+        nonlocal observed
+        observed = command
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("uv_packsize.cli._run_uv", succeed)
+
+    _install_package(
+        "/venv/bin/python",
+        ["example==1.0"],
+        build_policy=BuildPolicy.WHEEL_ONLY,
+        prerelease_policy="disallow",
+        quiet=True,
+    )
+
+    assert observed == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/venv/bin/python",
+        "--prerelease",
+        "disallow",
+        "--no-build",
+        "example==1.0",
+    ]
+
+
+def test_cli_records_effective_prerelease_policy_in_resolution_context(
+    monkeypatch, installed_venv
+):
+    default = _run_local_layout(
+        monkeypatch, installed_venv, ["sample==1.0"], json_output=True
+    )
+    explicit = _run_local_layout(
+        monkeypatch,
+        installed_venv,
+        ["sample==1.0"],
+        json_output=True,
+        prerelease_policy="allow",
+    )
+
+    assert default.exit_code == explicit.exit_code == 0
+    assert (
+        json.loads(default.stdout)["context"]["resolution_strategy"]
+        == "highest;prerelease=if-necessary"
+    )
+    assert (
+        json.loads(explicit.stdout)["context"]["resolution_strategy"]
+        == "highest;prerelease=allow"
+    )
 
 
 @pytest.mark.parametrize(

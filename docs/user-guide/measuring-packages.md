@@ -19,6 +19,26 @@ uvx uv-packsize requests==2.32.5 --json > analysis.json
 
 On success, standard output is exactly one JSON document. Check `schema_version` and `context.input_kind` before using a saved result. `--comparison-json` produces a versioned comparison document when a compatible baseline is supplied.
 
+## Pre-release dependencies
+
+Package requests explicitly use `--prerelease if-necessary` by default. Stable
+releases remain preferred, but packages such as `apache-airflow==3.0.0` can still
+resolve when part of their dependency graph requires a pre-release package:
+
+```bash
+uvx uv-packsize apache-airflow==3.0.0 --prerelease if-necessary
+```
+
+Use `--prerelease disallow` for a strict stable-only measurement, or
+`--prerelease allow` when every pre-release candidate may be considered. The
+effective policy is recorded in `context.resolution_strategy`, making results
+with different resolver conditions incompatible for baseline comparison.
+
+This setting is separate from `--allow-build`. Pre-release policy selects
+versions; build policy decides whether an sdist build backend may execute.
+`--prerelease` is only available for package requests because locked-project
+analysis obtains its resolver policy from the explicit lock.
+
 ## Explain a total with `--explain`
 
 Add text-only views when you need context for a result:

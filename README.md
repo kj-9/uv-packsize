@@ -75,6 +75,10 @@ Options:
                                   separately without changing the total.
   --allow-build                   Allow source builds during installation;
                                   disabled by default.
+  --prerelease [disallow|allow|if-necessary|explicit|if-necessary-or-explicit]
+                                  Pre-release resolution policy for package
+                                  requests. The default allows pre-releases only
+                                  when necessary.  [default: (if-necessary)]
   --json                          Write the versioned analysis result as JSON to
                                   stdout.
   --comparison-json               Write the versioned baseline comparison result
@@ -286,8 +290,26 @@ failure explains that a compatible wheel may be unavailable and directs you to
 ### Example
 
 ```bash
-uv-packsize apache-airflow==3.0.0
+uvx uv-packsize requests==2.32.5
 ```
+
+Package requests use `--prerelease if-necessary` by default. This keeps stable
+releases preferred while permitting a pre-release dependency when no stable
+solution exists. The policy is passed explicitly to `uv`, so a surrounding
+project's `[tool.uv].prerelease` setting does not silently change the result.
+Choose another policy when you need stricter or broader resolution:
+
+```bash
+uvx uv-packsize apache-airflow==3.0.0 --prerelease if-necessary
+uvx uv-packsize requests --prerelease disallow
+```
+
+The selected policy is recorded in JSON as part of
+`context.resolution_strategy`. `--prerelease` applies only to package requests;
+locked-project analysis uses the policy already captured by the explicit lock.
+It is independent from `--allow-build`: prerelease selection controls dependency
+resolution, while build permission controls whether source distributions may run
+a build backend.
 
 ### Multiple Packages
 

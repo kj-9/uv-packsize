@@ -94,6 +94,14 @@ _UV_VERSION = re.compile(
     r"uv\s+([0-9]+(?:\.[0-9]+)+(?:[-+][A-Za-z0-9.-]+)?)"
     r"(?:\s+\([A-Za-z0-9 ._+-]+\))?"
 )
+_PRERELEASE_POLICIES = (
+    "disallow",
+    "allow",
+    "if-necessary",
+    "explicit",
+    "if-necessary-or-explicit",
+)
+_DEFAULT_PRERELEASE_POLICY = "if-necessary"
 
 
 class UvCommandError(Exception):
@@ -243,11 +251,12 @@ def _create_venv(venv_dir, python=None, *, err=False, quiet=False):
     return python_executable
 
 
-def _install_package(
+def _install_package(  # noqa: PLR0913
     python_executable,
     package_names,
     *,
     build_policy: BuildPolicy,
+    prerelease_policy: str = _DEFAULT_PRERELEASE_POLICY,
     err=False,
     quiet=False,
 ):
@@ -266,6 +275,8 @@ def _install_package(
         "install",
         "--python",
         python_executable,
+        "--prerelease",
+        prerelease_policy,
     ]
     if build_policy is BuildPolicy.WHEEL_ONLY:
         install_command.append("--no-build")
@@ -438,6 +449,17 @@ def _explanation_failure_message(error: Exception) -> str:
     help="Allow source builds during installation; disabled by default.",
 )
 @click.option(
+    "--prerelease",
+    "prerelease_policy",
+    type=click.Choice(_PRERELEASE_POLICIES),
+    default=None,
+    show_default=_DEFAULT_PRERELEASE_POLICY,
+    help=(
+        "Pre-release resolution policy for package requests. The default allows "
+        "pre-releases only when necessary."
+    ),
+)
+@click.option(
     "--json",
     "json_output",
     is_flag=True,
@@ -552,6 +574,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
     breakdown,
     contributions,
     allow_build,
+    prerelease_policy,
     python_version,
 ):
     """Report the size of a Python package and its dependencies using uv."""
@@ -620,6 +643,8 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         comparison_baseline = None
 
     if prefix is not None:
+        if prerelease_policy is not None:
+            raise click.UsageError("--prerelease cannot be used with --prefix.")
         _validate_prefix_options(
             package_names=package_names,
             site_packages_relative=site_packages_relative,
@@ -644,6 +669,8 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         return
 
     if project_mode:
+        if prerelease_policy is not None:
+            raise click.UsageError("--prerelease cannot be used with --project.")
         _run_project_lock_analysis(
             project=project,
             lockfile=lockfile,
@@ -687,6 +714,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
         err=progress_to_stderr,
     )
     build_policy = BuildPolicy.ALLOW_BUILD if allow_build else BuildPolicy.WHEEL_ONLY
+    effective_prerelease_policy = prerelease_policy or _DEFAULT_PRERELEASE_POLICY
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = os.path.join(tmpdir, "venv")
@@ -701,6 +729,7 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 python_executable,
                 package_names,
                 build_policy=build_policy,
+                prerelease_policy=effective_prerelease_policy,
                 err=progress_to_stderr,
                 quiet=quiet,
             )
@@ -723,7 +752,9 @@ def cli(  # noqa: PLR0912, PLR0913, PLR0915
                 compile_bytecode=False,
                 extras=(),
                 index_identifiers=(),
-                resolution_strategy="highest",
+                resolution_strategy=(
+                    f"highest;prerelease={effective_prerelease_policy}"
+                ),
             )
             result = analyze_installed_environment(
                 context=environment.context,
