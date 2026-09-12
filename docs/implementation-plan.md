@@ -1,6 +1,6 @@
 # uv-packsize 実装計画・進捗
 
-最終更新: 2026-08-13
+最終更新: 2026-09-12
 
 この文書は、[`roadmap.md`](./roadmap.md)を実行可能なタスクへ分解し、現在の作業位置、完了条件、検証結果を一か所で追跡するための単一の管理表である。エージェントの作業規則は[`AGENTS.md`](../AGENTS.md)を参照する。
 
@@ -8,7 +8,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 現在のPhase | Follow-up: README executable example audit（`done`） |
+| 現在のPhase | Follow-up: inventory bytecode cache indexing（`done`） |
 | `in_progress` | なし |
 | 次のタスク | なし（外部F-007 blockerのみ） |
 | Phase 1進捗 | 9 / 9 完了（Phase 1 `done`） |
@@ -16,7 +16,56 @@
 | Blocker | F-007: build provenanceを安全に確定できるstableなuv上流featureと対応version待ち。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| 安定版リリース準備 | `0.2.0`へversion/classifierを更新済み。MkDocs移行とPages deployの確認後に公開する。 |
+| 安定版リリース準備 | `0.2.0`安定版は公開済み。version/classifier、Pages、release workflow、PyPI publishの検証を完了している。 |
+
+### 2026-09-12: `llm` package-mode performance review
+
+状態: `done`
+
+対象:
+
+- package-modeのinstall adapter、`uv` CLI呼び出し、cache再利用、およびinventory scanの実行時間をレビューした。直前のbytecode cache indexing変更を含む前後の実測結果を、今回のレビュー記録へ反映した。
+- 同一の`llm`測定を、依存wheelがcacheにあるwarm条件で比較した。変更前は19〜25秒、bytecode cache indexing変更後は12.56秒だった。
+
+所見:
+
+- package-modeの`uv pip install`はtemporary venvへ実行するが、通常の`uv` cacheを継承・再利用する。warm条件のinstall自体は約0.09秒で、主な遅延はresolver/downloadではなくinstalled-file inventoryである。
+- `llm`は29 distributions、3,269 files（`.py` 2,837件）を含む。各Python sourceについて`__pycache__`を再列挙する処理をcache directory単位のindexへ変更することで、測定時間が短縮された。
+- project/lock modeはambient設定を遮断するためtemporary root内のprivate `UV_CACHE_DIR`を使い、処理後にcacheも削除する。これは安全性と再現性を優先した設計であり、実行間のcache hitは発生しない。
+- `--target`/`--prefix`への変更、共有persistent cache、install optionの追加は、site-packages外のRECORD ownership、venv identity、scripts/data計測、およびambient設定遮断の契約を変える可能性があるため、別途fixtureとbenchmarkを伴う後続検討とする。
+
+検証:
+
+- `UV_CACHE_DIR=<task-local-cache> make test` — 1022 passed, 2 skipped。
+- `UV_CACHE_DIR=<task-local-cache> make ci-check` — 成功。
+- `UV_CACHE_DIR=<task-local-cache> uv lock --check` — 成功。
+- `git diff --check` — 成功。
+
+### 2026-09-12: Inventory bytecode cache indexing
+
+状態: `done`
+
+変更:
+
+- 同一distribution内の`.py`ごとに`__pycache__`を再列挙していた処理を、物理cache directoryごとの一括`.pyc` indexへ変更した。
+- direct sibling `.pyc`候補、case-insensitiveなstem照合、symlink/outside-prefix検証、`FILESYSTEM_ERROR`などのwarning分類は従来どおり維持した。
+- cache directoryの検査失敗はindexへ保持し、同じcacheを参照する各sourceへ従来と同じwarningを発行する。
+- 同一`__pycache__`の一度だけの列挙と、複数sourceでのscan error warning件数を回帰テストで固定した。
+
+検証:
+
+```bash
+UV_CACHE_DIR=/private/tmp/uv-packsize-bytecode-check-cache-20260912 uv run --locked pytest tests/test_inventory.py -q
+UV_CACHE_DIR=/private/tmp/uv-packsize-bytecode-check-cache-20260912 uv run --locked ruff check uv_packsize/inventory.py tests/test_inventory.py
+UV_CACHE_DIR=/private/tmp/uv-packsize-bytecode-check-cache-20260912 uv run --locked ruff format --check uv_packsize/inventory.py tests/test_inventory.py
+```
+
+結果:
+
+- `tests/test_inventory.py`は95 passed。
+- cache indexの性能回帰テストは同一`__pycache__`への`Path.iterdir()`が1回であることを確認した。
+- 新規コードのruff check/format checkは成功した。
+
 
 ### 2026-09-12: README executable example audit
 

@@ -396,6 +396,52 @@ def test_explicit_record_bytecode_stays_record(tmp_path):
     assert {entry.origin for entry in result.files} == {FileOrigin.RECORD}
 
 
+def test_generated_bytecode_cache_is_indexed_once_per_directory(tmp_path, monkeypatch):
+    layout, dist_info = posix_layout(tmp_path)
+    write_metadata(dist_info)
+    source_dir = layout.physical_site_packages / "example"
+    first_source = source_dir / "first.py"
+    second_source = source_dir / "second.py"
+    cache = source_dir / "__pycache__"
+    first_bytecode = cache / "first.cpython-312.pyc"
+    second_bytecode = cache / "second.cpython-312.pyc"
+    unrelated_bytecode = cache / "unrelated.cpython-312.pyc"
+    for path, content in (
+        (first_source, b"first"),
+        (second_source, b"second"),
+        (first_bytecode, b"first-bytecode"),
+        (second_bytecode, b"second-bytecode"),
+        (unrelated_bytecode, b"unrelated-bytecode"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    write_record(
+        dist_info,
+        [("example/first.py", "", ""), ("example/second.py", "", "")],
+    )
+
+    original_iterdir = Path.iterdir
+    cache_scans = 0
+
+    def counted_iterdir(path):
+        nonlocal cache_scans
+        if path == cache:
+            cache_scans += 1
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", counted_iterdir)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    generated = {
+        entry.path for entry in result.files if entry.origin is FileOrigin.GENERATED
+    }
+    assert cache_scans == 1
+    assert generated == {
+        "lib/python3.12/site-packages/example/__pycache__/first.cpython-312.pyc",
+        "lib/python3.12/site-packages/example/__pycache__/second.cpython-312.pyc",
+    }
+
+
 def test_missing_file_and_duplicate_record_entry_are_typed_warnings(tmp_path):
     layout, dist_info = posix_layout(tmp_path)
     write_metadata(dist_info)
@@ -818,6 +864,38 @@ def test_generated_bytecode_scan_error_is_file_typed_warning(tmp_path, monkeypat
     assert len(without_record_file(result)) == 1
     assert [warning.code for warning in result.warnings] == [
         WarningCode.FILESYSTEM_ERROR
+    ]
+
+
+def test_generated_bytecode_cache_error_warns_for_each_source(tmp_path, monkeypatch):
+    layout, dist_info = posix_layout(tmp_path)
+    write_metadata(dist_info)
+    source_dir = layout.physical_site_packages / "example"
+    first_source = source_dir / "first.py"
+    second_source = source_dir / "second.py"
+    cache = source_dir / "__pycache__"
+    first_source.parent.mkdir(parents=True)
+    first_source.write_bytes(b"first")
+    second_source.write_bytes(b"second")
+    cache.mkdir()
+    write_record(
+        dist_info,
+        [("example/first.py", "", ""), ("example/second.py", "", "")],
+    )
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(path):
+        if path == cache:
+            raise PermissionError("denied")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert len(without_record_file(result)) == 2
+    assert [warning.code for warning in result.warnings] == [
+        WarningCode.FILESYSTEM_ERROR,
+        WarningCode.FILESYSTEM_ERROR,
     ]
 
 
