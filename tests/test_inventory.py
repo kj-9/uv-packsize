@@ -606,8 +606,34 @@ def test_generated_bytecode_resolves_source_once_per_candidate(tmp_path, monkeyp
     result = collect_distribution(layout=layout, dist_info_dir=dist_info)
 
     assert len(without_record_file(result)) == 2
-    # Three RECORD rows plus source/cache resolution for each of two sources.
-    assert physical_path_calls == 7
+    # Only the three RECORD rows need lexical path resolution; generated
+    # bytecode reuses each source's already-resolved physical path.
+    assert physical_path_calls == 3
+
+
+def test_record_scan_reuses_one_resolved_prefix(tmp_path, monkeypatch):
+    layout, dist_info = posix_layout(tmp_path)
+    source = layout.physical_site_packages / "example.py"
+    source.write_bytes(b"source")
+    write_metadata(dist_info)
+    write_record(dist_info, [("example.py", "", "")])
+
+    original_physical_path = inventory_module._physical_path
+    resolved_prefixes = []
+
+    def counted_physical_path(*args, **kwargs):
+        resolved_prefixes.append(
+            kwargs.get("resolved_prefix") if "resolved_prefix" in kwargs else args[4]
+        )
+        return original_physical_path(*args, **kwargs)
+
+    monkeypatch.setattr(inventory_module, "_physical_path", counted_physical_path)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert len(without_record_file(result)) == 1
+    assert len(resolved_prefixes) == 2
+    assert resolved_prefixes[0] is not None
+    assert all(value is resolved_prefixes[0] for value in resolved_prefixes)
 
 
 def test_missing_file_and_duplicate_record_entry_are_typed_warnings(tmp_path):
@@ -849,7 +875,7 @@ def test_windows_case_collision_is_one_file_with_duplicate_warning(tmp_path):
     ]
 
 
-def test_windows_uppercase_python_source_generates_bytecode(tmp_path):
+def test_windows_uppercase_python_source_generates_bytecode(tmp_path, monkeypatch):
     layout, dist_info = windows_layout(tmp_path)
     write_metadata(dist_info)
     source = layout.physical_site_packages / "Example.PY"
@@ -859,12 +885,25 @@ def test_windows_uppercase_python_source_generates_bytecode(tmp_path):
     bytecode.write_bytes(b"bytecode")
     write_record(dist_info, [("example.py", "", "")])
 
+    original_physical_path = inventory_module._physical_path
+    physical_path_calls = 0
+
+    def counted_physical_path(*args, **kwargs):
+        nonlocal physical_path_calls
+        physical_path_calls += 1
+        return original_physical_path(*args, **kwargs)
+
+    monkeypatch.setattr(inventory_module, "_physical_path", counted_physical_path)
+
     result = collect_distribution(layout=layout, dist_info_dir=dist_info)
 
     assert {entry.origin for entry in result.files} == {
         FileOrigin.RECORD,
         FileOrigin.GENERATED,
     }
+    # The RECORD source and self entry are resolved once each.  The generated
+    # direct/cache candidates use the source's resolved physical parent.
+    assert physical_path_calls == 2
 
 
 def test_symlink_target_is_preserved_raw_even_with_surrounding_spaces(tmp_path):
