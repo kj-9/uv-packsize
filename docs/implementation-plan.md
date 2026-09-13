@@ -16,7 +16,17 @@
 | Blocker | F-007: build provenanceを安全に確定できるstableなuv上流featureと対応version待ち。 |
 | Phase 6進捗 | 3 / 3 完了（Phase 6 `done`） |
 | 次の成果物 | 上流Issue草案（ローカルのみ。投稿には明示承認が必要） |
-| 安定版リリース準備 | `0.2.0`安定版は公開済み。`0.2.1` patch release preparationは完了。release/tag/pushは未実施。 |
+| 安定版リリース | `0.2.0`および`0.2.1`安定版は公開済み。 |
+
+### 2026-09-13: `0.2.1` patch release 公開
+
+状態: `done`
+
+- commit `c78a06c`を`v0.2.1`のリリース内容としてGitHub Releaseへ公開した（non-draft、non-prerelease）。
+- publish workflow `34739507919`は、verify/test（Python 3.10〜3.14）/deploy/PyPIの全工程に成功した。
+- PyPIで`uvx --from uv-packsize==0.2.1`を実行し、表示versionが`0.2.1`であることを確認した。
+- fresh latest selectionとして`uvx --refresh-package uv-packsize`を実行し、`0.2.1`が選択されることを確認した。
+- これにより、patch release preparationで未実施としていたrelease/tag/push/PyPI publishは完了済みへ更新する。
 
 ### 2026-09-13: `0.2.1` patch release preparation
 
