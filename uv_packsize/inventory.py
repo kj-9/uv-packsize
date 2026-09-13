@@ -115,6 +115,37 @@ class ResolvedRecordPath:
     canonical_identity: str
 
 
+ResolvedPathIndex = dict[Path, Path]
+
+
+def _resolve_physical_path(
+    path: Path,
+    resolved_path_index: ResolvedPathIndex | None = None,
+) -> Path:
+    """Resolve one physical path, reusing results only during one scan.
+
+    Inventory runs after installation has completed and does not mutate the
+    measured prefix.  The caller owns this index and discards it after the
+    scan, so no resolution result is retained across environments or CLI
+    invocations.  Errors are deliberately not cached: every failed probe
+    keeps the existing filesystem-warning behavior and exception context.
+    """
+
+    if resolved_path_index is not None:
+        cached = resolved_path_index.get(path)
+        if cached is not None:
+            return cached
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError as error:
+        raise FilesystemInventoryError(
+            "physical path could not be inspected"
+        ) from error
+    if resolved_path_index is not None:
+        resolved_path_index[path] = resolved
+    return resolved
+
+
 def _pure_path(value: str, flavor: PathFlavor) -> PurePath:
     if not value or "\0" in value:
         raise InvalidRecordPathError("RECORD path must be non-empty and contain no NUL")
@@ -248,24 +279,22 @@ def _case_insensitive_child(
     return current / part
 
 
-def _physical_path(
+def _physical_path(  # noqa: PLR0913
     prefix: Path,
     relative_parts: tuple[str, ...],
     case_rule: CaseRule,
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> Path:
     current = prefix
     if resolved_prefix is None:
-        try:
-            resolved_prefix = prefix.resolve(strict=False)
-        except OSError as error:
-            raise FilesystemInventoryError(
-                "physical prefix could not be inspected"
-            ) from error
+        resolved_prefix = _resolve_physical_path(prefix, resolved_path_index)
     for part in relative_parts:
         try:
-            current.resolve(strict=False).relative_to(resolved_prefix)
+            _resolve_physical_path(current, resolved_path_index).relative_to(
+                resolved_prefix
+            )
         except ValueError as error:
             raise RecordPathOutsidePrefixError(
                 "RECORD path escapes prefix through an intermediate symlink"
@@ -384,13 +413,14 @@ class SupplementalOwnership:
         )
 
 
-def resolve_record_path(
+def resolve_record_path(  # noqa: PLR0913
     *,
     layout: InventoryLayout,
     dist_info_dir: Path,
     record_path: str,
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> ResolvedRecordPath:
     """Resolve one RECORD path lexically without following symlinks."""
 
@@ -419,6 +449,7 @@ def resolve_record_path(
             layout.case_rule,
             directory_index,
             resolved_prefix,
+            resolved_path_index,
         ),
         path=display_path,
         canonical_identity=canonical_identity,
@@ -431,6 +462,7 @@ def resolve_supplemental_path(
     supplemental_path: str,
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> ResolvedRecordPath:
     """Resolve one explicitly-owned path relative to the measurement prefix."""
 
@@ -458,6 +490,7 @@ def resolve_supplemental_path(
             layout.case_rule,
             directory_index,
             resolved_prefix,
+            resolved_path_index,
         ),
         path=display_path,
         canonical_identity=_key(display_path, layout.case_rule),
@@ -571,16 +604,17 @@ def _parent_is_safe(
     layout: InventoryLayout,
     path: Path,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> bool:
     if resolved_prefix is None:
-        try:
-            resolved_prefix = layout.physical_prefix.resolve(strict=False)
-        except OSError as error:
-            raise FilesystemInventoryError(
-                "physical prefix could not be inspected"
-            ) from error
+        resolved_prefix = _resolve_physical_path(
+            layout.physical_prefix,
+            resolved_path_index,
+        )
     try:
-        path.parent.resolve(strict=False).relative_to(resolved_prefix)
+        _resolve_physical_path(path.parent, resolved_path_index).relative_to(
+            resolved_prefix
+        )
     except ValueError:
         return False
     return True
@@ -592,11 +626,13 @@ def _entry_from_resolved(
     resolved: ResolvedRecordPath,
     origin: FileOrigin,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> FileEntry | None:
     if not _parent_is_safe(
         layout,
         resolved.physical_path,
         resolved_prefix,
+        resolved_path_index,
     ):
         raise RecordPathOutsidePrefixError(
             "RECORD path escapes prefix through an intermediate symlink"
@@ -670,6 +706,7 @@ def _fallback_entries(
     layout: InventoryLayout,
     dist_info_dir: Path,
     distribution_identity: str,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> tuple[tuple[FileEntry, ...], tuple[AnalysisWarning, ...]]:
     entries: list[FileEntry] = []
     warnings: list[AnalysisWarning] = []
@@ -691,6 +728,7 @@ def _fallback_entries(
                 layout=layout,
                 resolved=resolved,
                 origin=FileOrigin.FALLBACK,
+                resolved_path_index=resolved_path_index,
             )
         except RecordPathOutsidePrefixError:
             warnings.append(
@@ -752,6 +790,7 @@ def _bytecode_candidates(  # noqa: PLR0913
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     source_resolved: ResolvedRecordPath | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> tuple[Path, ...]:
     source_parts = tuple(source.path.split("/"))
     if source_resolved is None:
@@ -761,6 +800,7 @@ def _bytecode_candidates(  # noqa: PLR0913
             layout.case_rule,
             directory_index,
             resolved_prefix,
+            resolved_path_index,
         )
     else:
         source_path = source_resolved.physical_path
@@ -775,6 +815,7 @@ def _bytecode_candidates(  # noqa: PLR0913
                 layout.case_rule,
                 directory_index,
                 resolved_prefix,
+                resolved_path_index,
             )
         cache_dir = _physical_path(
             layout.physical_prefix,
@@ -782,6 +823,7 @@ def _bytecode_candidates(  # noqa: PLR0913
             layout.case_rule,
             directory_index,
             resolved_prefix,
+            resolved_path_index,
         )
     elif layout.case_rule is CaseRule.SENSITIVE:
         direct_candidate = source_parent / f"{source_path.stem}.pyc"
@@ -797,7 +839,12 @@ def _bytecode_candidates(  # noqa: PLR0913
             "__pycache__",
             directory_index,
         )
-    if not _parent_is_safe(layout, cache_dir, resolved_prefix):
+    if not _parent_is_safe(
+        layout,
+        cache_dir,
+        resolved_prefix,
+        resolved_path_index,
+    ):
         raise RecordPathOutsidePrefixError(
             "generated bytecode cache escapes prefix through an intermediate symlink"
         )
@@ -831,6 +878,7 @@ def _generated_bytecode(  # noqa: PLR0913
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     resolved_record_paths: dict[str, ResolvedRecordPath] | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> tuple[tuple[FileEntry, ...], tuple[AnalysisWarning, ...]]:
     generated: list[FileEntry] = []
     warnings: list[AnalysisWarning] = []
@@ -850,6 +898,7 @@ def _generated_bytecode(  # noqa: PLR0913
                     else None
                 ),
                 resolved_prefix=resolved_prefix,
+                resolved_path_index=resolved_path_index,
             )
         except RecordPathOutsidePrefixError:
             warnings.append(
@@ -877,6 +926,7 @@ def _generated_bytecode(  # noqa: PLR0913
                     resolved=resolved,
                     origin=FileOrigin.GENERATED,
                     resolved_prefix=resolved_prefix,
+                    resolved_path_index=resolved_path_index,
                 )
             except RecordPathOutsidePrefixError:
                 warnings.append(
@@ -916,6 +966,7 @@ def _collect_record_entries(  # noqa: PLR0913
     distribution_identity: str,
     directory_index: dict[Path, tuple[str, ...] | Exception] | None = None,
     resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> tuple[
     tuple[FileEntry, ...],
     tuple[AnalysisWarning, ...],
@@ -933,6 +984,7 @@ def _collect_record_entries(  # noqa: PLR0913
                 record_path=recorded_path,
                 directory_index=directory_index,
                 resolved_prefix=resolved_prefix,
+                resolved_path_index=resolved_path_index,
             )
         except InvalidRecordPathError:
             warnings.append(
@@ -974,6 +1026,7 @@ def _collect_record_entries(  # noqa: PLR0913
                 resolved=resolved,
                 origin=FileOrigin.RECORD,
                 resolved_prefix=resolved_prefix,
+                resolved_path_index=resolved_path_index,
             )
         except RecordPathOutsidePrefixError:
             warnings.append(
@@ -1018,6 +1071,7 @@ def _collect_record_entries(  # noqa: PLR0913
         directory_index=directory_index,
         resolved_record_paths=resolved_record_paths,
         resolved_prefix=resolved_prefix,
+        resolved_path_index=resolved_path_index,
     )
     return (
         (*entries, *generated_entries),
@@ -1030,9 +1084,12 @@ def collect_distribution(  # noqa: PLR0911
     *,
     layout: InventoryLayout,
     dist_info_dir: Path,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> DistributionResult:
     """Collect one distribution without scanning or mutating other environments."""
 
+    if resolved_path_index is None:
+        resolved_path_index = {}
     dist_info_dir = Path(os.path.abspath(dist_info_dir))
     if dist_info_dir.parent != layout.physical_site_packages:
         raise ValueError("dist_info_dir must be directly inside physical_site_packages")
@@ -1058,6 +1115,7 @@ def collect_distribution(  # noqa: PLR0911
             layout,
             dist_info_dir,
             distribution_identity,
+            resolved_path_index,
         )
         return DistributionResult(
             name=name,
@@ -1130,8 +1188,11 @@ def collect_distribution(  # noqa: PLR0911
         )
 
     try:
-        resolved_prefix = layout.physical_prefix.resolve(strict=False)
-    except OSError:
+        resolved_prefix = _resolve_physical_path(
+            layout.physical_prefix,
+            resolved_path_index,
+        )
+    except FilesystemInventoryError:
         return DistributionResult(
             name=name,
             version=version,
@@ -1158,6 +1219,7 @@ def collect_distribution(  # noqa: PLR0911
         distribution_identity=distribution_identity,
         directory_index=directory_index,
         resolved_prefix=resolved_prefix,
+        resolved_path_index=resolved_path_index,
     )
     record_completeness_warnings = (
         ()
@@ -1287,12 +1349,16 @@ def _collect_supplemental_entry(
     *,
     layout: InventoryLayout,
     resolved: ResolvedRecordPath,
+    resolved_prefix: Path | None = None,
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> FileEntry:
     try:
         entry = _entry_from_resolved(
             layout=layout,
             resolved=resolved,
             origin=FileOrigin.DISCOVERED,
+            resolved_prefix=resolved_prefix,
+            resolved_path_index=resolved_path_index,
         )
     except RecordPathOutsidePrefixError as error:
         raise SupplementalInventoryError(
@@ -1324,6 +1390,7 @@ def _apply_supplemental(
         tuple[InventoryLayout, DistributionResult],
     ],
     supplemental: tuple[SupplementalOwnership, ...],
+    resolved_path_index: ResolvedPathIndex | None = None,
 ) -> None:
     paths_by_owner: dict[tuple[str, str], set[str]] = {}
     for ownership in supplemental:
@@ -1355,6 +1422,7 @@ def _apply_supplemental(
                 resolved = resolve_supplemental_path(
                     layout=layout,
                     supplemental_path=path,
+                    resolved_path_index=resolved_path_index,
                 )
             except InvalidRecordPathError as error:
                 raise SupplementalInventoryError(
@@ -1376,6 +1444,7 @@ def _apply_supplemental(
             entry = _collect_supplemental_entry(
                 layout=layout,
                 resolved=resolved,
+                resolved_path_index=resolved_path_index,
             )
             claimed_identities.add(entry.canonical_identity)
             files.append(entry)
@@ -1423,6 +1492,7 @@ def collect_distributions(
         tuple[str, str],
         tuple[InventoryLayout, DistributionResult],
     ] = {}
+    resolved_path_index: ResolvedPathIndex = {}
     distribution_owners: dict[str, tuple[str, Path]] = {}
     for layout in layouts:
         for dist_info_dir in direct_dist_info_directories(layout):
@@ -1430,6 +1500,7 @@ def collect_distributions(
                 result = collect_distribution(
                     layout=layout,
                     dist_info_dir=dist_info_dir,
+                    resolved_path_index=resolved_path_index,
                 )
             except InventoryError as error:
                 raise InventoryScanError(
@@ -1450,6 +1521,7 @@ def collect_distributions(
     _apply_supplemental(
         owner_results=owner_results,
         supplemental=supplemental,
+        resolved_path_index=resolved_path_index,
     )
     distributions = tuple(
         sorted(

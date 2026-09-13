@@ -636,6 +636,38 @@ def test_record_scan_reuses_one_resolved_prefix(tmp_path, monkeypatch):
     assert all(value is resolved_prefixes[0] for value in resolved_prefixes)
 
 
+def test_resolved_path_cache_is_local_to_one_scan(tmp_path, monkeypatch):
+    layout, dist_info = posix_layout(tmp_path)
+    source_dir = layout.physical_site_packages / "example"
+    source_dir.mkdir()
+    (source_dir / "first.py").write_bytes(b"first")
+    (source_dir / "second.py").write_bytes(b"second")
+    write_metadata(dist_info)
+    write_record(
+        dist_info,
+        [("example/first.py", "", ""), ("example/second.py", "", "")],
+    )
+
+    original_resolve = Path.resolve
+    resolve_calls = 0
+
+    def counted_resolve(path, *args, **kwargs):
+        nonlocal resolve_calls
+        resolve_calls += 1
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counted_resolve)
+    collect_distributions(layouts=(layout,))
+    first_scan_calls = resolve_calls
+    collect_distributions(layouts=(layout,))
+    second_scan_calls = resolve_calls - first_scan_calls
+
+    # Shared directory prefixes are resolved once per scan, while a new scan
+    # starts with an empty index and probes the filesystem again.
+    assert first_scan_calls == second_scan_calls
+    assert first_scan_calls < 15
+
+
 def test_missing_file_and_duplicate_record_entry_are_typed_warnings(tmp_path):
     layout, dist_info = posix_layout(tmp_path)
     write_metadata(dist_info)
@@ -1702,8 +1734,9 @@ def test_scan_rejects_conflicting_shared_file_signatures(tmp_path, monkeypatch):
     first.mkdir()
     second.mkdir()
 
-    def fake_collect_distribution(*, layout, dist_info_dir):
+    def fake_collect_distribution(*, layout, dist_info_dir, resolved_path_index):
         del layout
+        del resolved_path_index
         size = 1 if dist_info_dir == first else 2
         return DistributionResult(
             name=dist_info_dir.name.split("-", 1)[0],

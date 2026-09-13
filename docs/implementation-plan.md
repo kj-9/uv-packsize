@@ -59,6 +59,14 @@
 - 旧記録のisolatedな空`UV_CACHE_DIR`での初回7.10秒は、開発bootstrapと製品CLI計算の境界が明確でなかったため、最終的なcold基準として扱わない。過去レビューのユーザー実測13.032秒（旧レビュー12.56秒）も同様に履歴値として保持する。
 - `llm` warm実行で`_physical_path`は11,779回から3,268回へ、`Path.resolve()`は105,693回から31,337回へ減少した。inventory JSONのdistribution/file/total値は変更前後で一致した。
 - 同一warm条件のCLI wall timeは約4.1秒から約1.9〜2.0秒へ短縮した。
+- 追加のscan-local `Path.resolve(strict=False)` memoizationは、install完了後の
+  temporary venvを分析中に変更しないことを前提に、`collect_distributions`の
+  1回のscanだけへ有効範囲を限定する。キャッシュはprocess/globalへ保持せず、
+  prefix分析を含む各scanの終了時に破棄する。中間symlink、prefix containment、
+  case ambiguity、最終`lstat()`、warning契約は従来どおり維持する。
+- 同じcache済みwheel条件で、HEAD相当と変更後の一時source copyを
+  `uvx --isolated --from <source> uv-packsize llm`で比較した。warm wallは
+  変更前1.83〜1.84秒、変更後1.10〜1.11秒となり、report出力は一致した。
 
 ### 2026-09-12: `llm` package-mode performance review
 
