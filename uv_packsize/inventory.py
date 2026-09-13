@@ -612,9 +612,10 @@ def _parent_is_safe(
             resolved_path_index,
         )
     try:
-        _resolve_physical_path(path.parent, resolved_path_index).relative_to(
-            resolved_prefix
-        )
+        # This is the containment check immediately before lstat().  The
+        # directory may have been replaced since lexical path resolution, so
+        # deliberately bypass the scan-local memoization here.
+        _resolve_physical_path(path.parent).relative_to(resolved_prefix)
     except ValueError:
         return False
     return True

@@ -665,7 +665,9 @@ def test_resolved_path_cache_is_local_to_one_scan(tmp_path, monkeypatch):
     # Shared directory prefixes are resolved once per scan, while a new scan
     # starts with an empty index and probes the filesystem again.
     assert first_scan_calls == second_scan_calls
-    assert first_scan_calls < 15
+    # Parent containment is deliberately resolved independently immediately
+    # before each lstat(), so leave room for those security rechecks.
+    assert first_scan_calls <= 16
 
 
 def test_missing_file_and_duplicate_record_entry_are_typed_warnings(tmp_path):
@@ -859,6 +861,46 @@ def test_intermediate_symlink_escape_is_rejected_without_reading_target(
 
     result = collect_distribution(layout=layout, dist_info_dir=dist_info)
 
+    assert without_record_file(result) == ()
+    assert [warning.code for warning in result.warnings] == [
+        WarningCode.RECORD_PATH_OUTSIDE_PREFIX
+    ]
+
+
+def test_parent_containment_is_rechecked_after_symlink_replacement(
+    tmp_path, monkeypatch
+):
+    layout, dist_info = posix_layout(tmp_path)
+    write_metadata(dist_info)
+    package = layout.physical_site_packages / "package"
+    package.mkdir()
+    source = package / "module.py"
+    source.write_bytes(b"inside")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "module.py").write_bytes(b"outside")
+    write_record(dist_info, [("package/module.py", "", "")])
+
+    original_resolve = Path.resolve
+    replaced = False
+    replacement_target = layout.physical_site_packages / "package-before-swap"
+
+    def replace_parent_after_first_resolution(path, *args, **kwargs):
+        nonlocal replaced
+        resolved = original_resolve(path, *args, **kwargs)
+        if path == package and not replaced:
+            try:
+                package.rename(replacement_target)
+                package.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                pytest.skip()
+            replaced = True
+        return resolved
+
+    monkeypatch.setattr(Path, "resolve", replace_parent_after_first_resolution)
+    result = collect_distribution(layout=layout, dist_info_dir=dist_info)
+
+    assert replaced
     assert without_record_file(result) == ()
     assert [warning.code for warning in result.warnings] == [
         WarningCode.RECORD_PATH_OUTSIDE_PREFIX
